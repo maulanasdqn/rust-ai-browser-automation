@@ -19,6 +19,7 @@ pub struct AcceptanceCriteria {
 pub struct BrowserAction {
     pub action_type: String,
     pub selector: Option<String>,
+    pub element_description: Option<String>,
     pub url: Option<String>,
     pub text: Option<String>,
     pub wait_condition: Option<String>,
@@ -240,6 +241,7 @@ impl ACAutomationProcessor {
             actions.push(BrowserAction {
                 action_type: "navigate".to_string(),
                 selector: None,
+                element_description: None,
                 url: Some(url),
                 text: None,
                 wait_condition: Some("page_load".to_string()),
@@ -253,6 +255,7 @@ impl ACAutomationProcessor {
             actions.push(BrowserAction {
                 action_type: "click".to_string(),
                 selector: Some(selector),
+                element_description: None,
                 url: None,
                 text: None,
                 wait_condition: Some("element_clickable".to_string()),
@@ -270,6 +273,7 @@ impl ACAutomationProcessor {
             actions.push(BrowserAction {
                 action_type: "type".to_string(),
                 selector: Some(selector),
+                element_description: None,
                 url: None,
                 text: Some(text),
                 wait_condition: Some("element_visible".to_string()),
@@ -284,6 +288,7 @@ impl ACAutomationProcessor {
             actions.push(BrowserAction {
                 action_type: "select".to_string(),
                 selector: Some(selector),
+                element_description: None,
                 url: None,
                 text: Some(text),
                 wait_condition: Some("element_visible".to_string()),
@@ -296,6 +301,7 @@ impl ACAutomationProcessor {
             actions.push(BrowserAction {
                 action_type: "wait".to_string(),
                 selector: None,
+                element_description: None,
                 url: None,
                 text: None,
                 wait_condition: Some("page_stable".to_string()),

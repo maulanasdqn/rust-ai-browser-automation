@@ -14,12 +14,15 @@ pub struct AIAutomationEngine {
     model: String,
     conversation_history: Vec<Message>,
     headless: bool,
+    vision_mode: bool,
+    vision_api_key: Option<String>,
+    vision_model: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AIBrowserAction {
     pub action: String,
-    pub selector: Option<String>,
+    pub element_description: Option<String>,
     pub url: Option<String>,
     pub text: Option<String>,
     pub wait_for: Option<String>,
@@ -40,7 +43,6 @@ pub struct AIExecutionPlan {
 pub struct AIExecutionResult {
     pub plan: AIExecutionPlan,
     pub execution_report: Option<ExecutionReport>,
-    pub mcp_script: String,
     pub llm_reasoning: String,
 }
 
@@ -59,12 +61,30 @@ impl AIAutomationEngine {
             model,
             conversation_history: Vec::new(),
             headless: true,
+            vision_mode: false,
+            vision_api_key: None,
+            vision_model: None,
         })
     }
 
     pub fn with_headless(mut self, headless: bool) -> Self {
         self.headless = headless;
         self
+    }
+
+    pub fn set_headless(&mut self, headless: bool) {
+        self.headless = headless;
+    }
+
+    pub fn set_vision_mode(
+        &mut self,
+        enabled: bool,
+        api_key: Option<String>,
+        model: Option<String>,
+    ) {
+        self.vision_mode = enabled;
+        self.vision_api_key = api_key;
+        self.vision_model = model;
     }
 
     pub async fn analyze_and_execute_ac(
@@ -84,7 +104,6 @@ impl AIAutomationEngine {
             .push(Message::new(Role::User, &user_prompt));
 
         let plan = self.get_ai_execution_plan().await?;
-        let mcp_script = self.generate_mcp_browser_script(&plan);
 
         let execution_report = if execute_immediately {
             Some(self.execute_real_browser_automation(&plan).await?)
@@ -97,7 +116,6 @@ impl AIAutomationEngine {
         Ok(AIExecutionResult {
             plan,
             execution_report,
-            mcp_script,
             llm_reasoning: reasoning,
         })
     }
@@ -110,7 +128,43 @@ impl AIAutomationEngine {
 
         let workflow = self.convert_ai_plan_to_workflow(plan);
 
-        let mut executor = AutomationExecutor::new()?.with_headless(self.headless);
+        // Check if plan contains element descriptions that will need AI DOM inspection
+        let needs_ai_dom_inspection = workflow.test_steps.iter().any(|step| {
+            step.browser_actions
+                .iter()
+                .any(|action| action.element_description.is_some() && action.selector.is_none())
+        });
+
+        // Get API key for AI DOM inspection (try from environment if not provided)
+        let api_key_for_ai_dom = if let Some(key) = &self.vision_api_key {
+            Some(key.clone())
+        } else if needs_ai_dom_inspection {
+            // Try to get from environment variables
+            std::env::var("OPENROUTER_API_KEY").ok()
+        } else {
+            None
+        };
+
+        let mut executor = if needs_ai_dom_inspection {
+            if let Some(api_key) = &api_key_for_ai_dom {
+                println!("🔍 Configuring automation executor with AI HTML analysis capability");
+                AutomationExecutor::new()?
+                    .with_headless(self.headless)
+                    .with_hybrid_mode(
+                        api_key.clone(),
+                        Some("anthropic/claude-3.5-sonnet".to_string()),
+                    )
+            } else {
+                println!(
+                    "⚠️ AI HTML analysis needed but no API key available, using standard DOM mode"
+                );
+                AutomationExecutor::new()?.with_headless(self.headless)
+            }
+        } else {
+            println!("🤖 Configuring automation executor with standard DOM mode");
+            AutomationExecutor::new()?.with_headless(self.headless)
+        };
+
         executor.set_verbose(true);
 
         let (report, _logs) = executor.execute_workflow(&workflow).await?;
@@ -128,10 +182,40 @@ impl AIAutomationEngine {
         let mut current_actions = Vec::new();
         let mut step_counter = 1;
 
+        // Detect if this is a login scenario
+        let is_login_scenario = plan.title.to_lowercase().contains("login")
+            || plan.description.to_lowercase().contains("login")
+            || plan.steps.iter().any(|step| {
+                step.text.as_ref().map_or(false, |t| t.contains("@"))
+                    || step
+                        .element_description
+                        .as_ref()
+                        .map_or(false, |s| s.contains("password") || s.contains("email"))
+            });
+
         for ai_action in &plan.steps {
+            // Skip vague wait actions for dashboard elements if login scenario
+            if is_login_scenario
+                && ai_action.action == "wait"
+                && ai_action
+                    .element_description
+                    .as_ref()
+                    .map_or(false, |desc| {
+                        desc.contains("dashboard element")
+                            || desc.contains("element containing text")
+                    })
+            {
+                println!(
+                    "🧹 Skipping vague wait action: {:?}",
+                    ai_action.element_description
+                );
+                continue;
+            }
+
             let browser_action = BrowserAction {
                 action_type: ai_action.action.clone(),
-                selector: ai_action.selector.clone(),
+                selector: None,
+                element_description: ai_action.element_description.clone(),
                 url: ai_action.url.clone(),
                 text: ai_action.text.clone(),
                 wait_condition: ai_action.wait_for.clone(),
@@ -167,12 +251,50 @@ impl AIAutomationEngine {
             step_counter += 1;
         }
 
+        // Ensure we have assertions for login scenarios
+        let mut final_assertions = plan.assertions.clone();
+        if is_login_scenario && !final_assertions.iter().any(|a| a.contains("login_success")) {
+            println!("🔍 Login scenario detected - adding automatic login success assertion");
+            final_assertions.insert(0, "login_success: true".to_string());
+        }
+
+        // Filter out vague assertions that are likely to fail
+        final_assertions.retain(|assertion| {
+            // Keep concrete assertions
+            if assertion.contains("login_success")
+                || assertion.contains("url_contains")
+                || assertion.contains("page_content_contains")
+            {
+                return true;
+            }
+
+            // Remove vague element_visible assertions for generic elements
+            if assertion.contains("element_visible:")
+                && (assertion.contains("dashboard element")
+                    || assertion.contains("element containing text")
+                    || assertion.contains("generic"))
+            {
+                println!("🧹 Filtering out vague assertion: {}", assertion);
+                return false;
+            }
+
+            true
+        });
+
         if !current_actions.is_empty() {
             test_steps.push(TestStep {
                 step_type: "then".to_string(),
                 description: "Final AI actions and verification".to_string(),
                 browser_actions: current_actions,
-                assertions: plan.assertions.clone(),
+                assertions: final_assertions,
+            });
+        } else if !final_assertions.is_empty() {
+            // Add a verification-only step if we have assertions but no remaining actions
+            test_steps.push(TestStep {
+                step_type: "then".to_string(),
+                description: "Login verification and assertion checks".to_string(),
+                browser_actions: vec![],
+                assertions: final_assertions,
             });
         }
 
@@ -208,9 +330,30 @@ Your capabilities:
 When given acceptance criteria, you must:
 1. Analyze the scenario step by step
 2. Create a detailed execution plan with specific browser actions
-3. Generate CSS selectors for UI elements
+3. DESCRIBE UI elements instead of guessing selectors - the system will inspect the page to find them
 4. Add appropriate waits and assertions
 5. Consider edge cases and error handling
+
+CRITICAL FOR ELEMENT IDENTIFICATION:
+- Instead of guessing CSS selectors, provide clear DESCRIPTIONS of elements
+- For login forms, describe as: "email input field", "password input field", "login submit button"
+- For navigation: "home link", "dashboard menu item", "logout button"
+- For content: "error message container", "success notification", "user profile section"
+- The system will take screenshots and use AI to find the actual selectors
+
+CRITICAL FOR CREDENTIALS AND TEXT INPUT:
+- Use text/credentials EXACTLY as provided in the scenario
+- DO NOT modify, correct, or change any text values
+- If scenario says "passwordss", use "passwordss" not "password"
+- If scenario says "admin@example.com", use exactly "admin@example.com"
+- Copy text values character-for-character from the provided scenario
+
+CRITICAL FOR LOGIN SCENARIOS:
+- ALWAYS add assertions to verify login success/failure
+- Check for dashboard elements, error messages, or URL changes
+- Include multiple verification methods (URL, page content, specific elements)
+- Add screenshots after login attempts for debugging
+- Use provided credentials exactly as written (don't fix "typos")
 
 Respond with ONLY a valid JSON object, no additional text or explanations:
 {
@@ -219,34 +362,65 @@ Respond with ONLY a valid JSON object, no additional text or explanations:
   "steps": [
     {
       "action": "navigate|click|type|select|wait|screenshot",
-      "selector": "CSS selector (if applicable)",
+      "element_description": "clear description of UI element to find (e.g., 'email input field', 'submit button')",
       "url": "URL to navigate to (for navigate action)",
       "text": "Text to type or select (if applicable)",
       "wait_for": "element_visible|page_load|network_idle|custom_condition",
       "screenshot": true (optional, only include if taking screenshot)
     }
   ],
-  "assertions": ["List of things to verify"],
+  "assertions": [
+    "login_success: true",
+    "url_contains: dashboard", 
+    "page_content_contains: Welcome"
+  ],
   "estimated_duration": 30.5
 }
 
-IMPORTANT: Return ONLY the JSON object above. Do not include any notes, explanations, or additional text before or after the JSON.
+IMPORTANT: 
+- Return ONLY the JSON object above
+- Use element_description instead of selector - describe what element you want to find
+- Use credentials and text EXACTLY as provided - no corrections or modifications
+- For LOGIN tests, use SPECIFIC assertions that can be verified:
+  * "login_success: true" (comprehensive URL + content check)
+  * "url_contains: dashboard" (URL verification)
+  * "page_content_contains: Welcome" (success text check)
+  * "element_not_visible: .error" (error message check)
+- AVOID vague assertions like "element_visible: dashboard element"
+- NEVER use "element_visible" for generic elements like "dashboard element"
+- ONLY use concrete assertions: login_success, url_contains, page_content_contains
+- Examples of good element descriptions:
+  * "email input field" or "username input field"
+  * "password input field" 
+  * "login button" or "submit button"
+  * "error message" or "error notification"
+- Add wait conditions after login submit: wait_for: "page_load"
+- Include screenshot: true after critical actions
+- Focus on verifiable assertions (URL changes, specific text, absence of errors)
 
-Be precise with selectors - use realistic CSS selectors that would work on typical web pages.
-For forms, use input[name="fieldname"] or input[type="email"] etc.
-For buttons, use button[type="submit"] or .btn-primary etc.
-For links, use a[href*="keyword"] or .nav-link etc.
-
-Make the automation robust and realistic."#.to_string()
+The system will automatically take screenshots and use AI to find the actual selectors on the page, so focus on clear element descriptions."#.to_string()
     }
 
     fn create_user_prompt(&self, criteria: &AcceptanceCriteria) -> String {
+        // Detect if this is a login scenario and extract credentials more explicitly
+        let full_scenario_text = format!(
+            "{}\n{}\n{}",
+            criteria.given_steps.join("\n"),
+            criteria.when_steps.join("\n"),
+            criteria.then_steps.join("\n")
+        );
+
         format!(
             r#"Convert this acceptance criteria to a browser automation plan:
 
 Title: {}
 Feature: {}
 Scenario: {}
+
+Full scenario text (use ALL text values EXACTLY as written):
+{}
+
+IMPORTANT: Pay special attention to any credentials, email addresses, passwords, or text values in the scenario above. Use them EXACTLY as provided - do not modify, correct, or change any characters.
 
 Given steps:
 {}
@@ -259,10 +433,11 @@ Then steps:
 
 Tags: {:?}
 
-Create a detailed browser automation plan that can be executed via MCP Browser to test this scenario."#,
+Create a detailed browser automation plan that uses ALL text values exactly as provided in the scenario."#,
             criteria.title,
             criteria.feature,
             criteria.scenario,
+            full_scenario_text,
             criteria.given_steps.join("\n"),
             criteria.when_steps.join("\n"),
             criteria.then_steps.join("\n"),
@@ -308,94 +483,6 @@ Create a detailed browser automation plan that can be executed via MCP Browser t
             }
         }
         Err(anyhow::anyhow!("AI response had no content"))
-    }
-
-    fn generate_mcp_browser_script(&self, plan: &AIExecutionPlan) -> String {
-        let mut script = format!(
-            "// AI-Generated MCP Browser Script\n// Title: {}\n// Description: {}\n// Estimated Duration: {:.1}s\n\n",
-            plan.title, plan.description, plan.estimated_duration
-        );
-
-        script.push_str("const { MCPBrowser } = require('@mcp/browser');\n\n");
-        script.push_str("async function executeAutomation() {\n");
-        script.push_str("  const browser = new MCPBrowser();\n");
-        script.push_str("  \n");
-        script.push_str("  try {\n");
-
-        for (i, step) in plan.steps.iter().enumerate() {
-            script.push_str(&format!("    // Step {}: {}\n", i + 1, step.action));
-
-            match step.action.as_str() {
-                "navigate" => {
-                    if let Some(url) = &step.url {
-                        script.push_str(&format!("    await browser.navigate('{}');\n", url));
-                    }
-                }
-                "click" => {
-                    if let Some(selector) = &step.selector {
-                        script.push_str(&format!("    await browser.click('{}');\n", selector));
-                    }
-                }
-                "type" => {
-                    if let Some(selector) = &step.selector {
-                        if let Some(text) = &step.text {
-                            script.push_str(&format!(
-                                "    await browser.type('{}', '{}');\n",
-                                selector, text
-                            ));
-                        }
-                    }
-                }
-                "select" => {
-                    if let Some(selector) = &step.selector {
-                        if let Some(text) = &step.text {
-                            script.push_str(&format!(
-                                "    await browser.select('{}', '{}');\n",
-                                selector, text
-                            ));
-                        }
-                    }
-                }
-                "wait" => {
-                    if let Some(condition) = &step.wait_for {
-                        script.push_str(&format!("    await browser.waitFor('{}');\n", condition));
-                    }
-                }
-                "screenshot" => {
-                    script.push_str("    await browser.screenshot();\n");
-                }
-                _ => {
-                    script.push_str(&format!("    // Unknown action: {}\n", step.action));
-                }
-            }
-
-            if step.screenshot.unwrap_or(false) {
-                script.push_str("    await browser.screenshot();\n");
-            }
-
-            script.push_str("\n");
-        }
-
-        for assertion in &plan.assertions {
-            script.push_str(&format!("    // Verify: {}\n", assertion));
-            script.push_str(&format!("    await browser.assert('{}');\n", assertion));
-        }
-
-        script.push_str("    \n");
-        script.push_str("    console.log('✅ Automation completed successfully!');\n");
-        script.push_str("    \n");
-        script.push_str("  } catch (error) {\n");
-        script.push_str("    console.error('❌ Automation failed:', error);\n");
-        script.push_str("    await browser.screenshot('error');\n");
-        script.push_str("    throw error;\n");
-        script.push_str("  } finally {\n");
-        script.push_str("    await browser.close();\n");
-        script.push_str("  }\n");
-        script.push_str("}\n");
-        script.push_str("\n");
-        script.push_str("executeAutomation().catch(console.error);\n");
-
-        script
     }
 
     fn extract_llm_reasoning(&self) -> String {

@@ -151,10 +151,6 @@ async fn run_pipeline(
             }
 
             println!("\n📁 Generated Outputs:");
-            println!(
-                "- MCP Browser Script: {} lines",
-                result.mcp_script.lines().count()
-            );
             println!("- Workflow JSON: Available in result");
             println!("- Parsed AC: Available in result");
 

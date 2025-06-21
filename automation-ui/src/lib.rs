@@ -32,6 +32,8 @@ pub struct ProcessACRequest {
     #[serde(default)]
     pub execute_immediately: Option<bool>,
     #[serde(default)]
+    pub headless_mode: Option<bool>,
+    #[serde(default)]
     pub use_ai: Option<bool>,
     #[serde(default)]
     pub openrouter_api_key: Option<String>,
@@ -53,7 +55,6 @@ pub struct ProcessACResponse {
     pub message: String,
     pub workflow_id: Option<String>,
     pub workflow: Option<automation_api::AutomationWorkflow>,
-    pub mcp_script: Option<String>,
     pub execution_report: Option<automation_browser::ExecutionReport>,
     pub execution_logs: Option<Vec<AutomationLog>>,
     pub ai_used: bool,
@@ -107,10 +108,6 @@ pub fn create_app(state: SharedState) -> Router {
             post(execute_workflow).options(options_handler),
         )
         .route(
-            "/api/script/:workflow_id",
-            get(get_script).options(options_handler),
-        )
-        .route(
             "/api/env-status",
             get(get_env_status).options(options_handler),
         )
@@ -143,18 +140,51 @@ pub async fn start_server(port: u16) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn home_page() -> impl IntoResponse {
-    match std::fs::read_to_string("automation-ui/templates/index.html") {
-        Ok(content) => (
-            StatusCode::OK,
-            [(axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8")],
-            Html(content),
-        ),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            [(axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8")],
-            Html(format!("<h1>Error loading template: {}</h1>", e)),
-        ),
+    // Try multiple possible paths for the template file
+    let possible_paths = [
+        "templates/index.html",                  // When run from automation-ui/
+        "automation-ui/templates/index.html",    // When run from project root
+        "../automation-ui/templates/index.html", // Alternative path
+    ];
+
+    for path in &possible_paths {
+        match std::fs::read_to_string(path) {
+            Ok(content) => {
+                println!("📄 Successfully loaded template from: {}", path);
+                return (
+                    StatusCode::OK,
+                    [(axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8")],
+                    Html(content),
+                );
+            }
+            Err(_) => continue,
+        }
     }
+
+    // If none of the paths work, return a detailed error
+    let current_dir = std::env::current_dir()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|_| "unknown".to_string());
+
+    println!(
+        "❌ Could not find template file. Current directory: {}",
+        current_dir
+    );
+    println!("🔍 Tried paths: {:?}", possible_paths);
+
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        [(axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        Html(format!(
+            r#"<h1>Error loading template</h1>
+               <p>Could not find index.html template file.</p>
+               <p>Current directory: {}</p>
+               <p>Tried paths: {:?}</p>
+               <p>Please ensure you're running the server from the correct directory.</p>
+               <p><strong>Fix:</strong> Run <code>cd automation-ui && cargo run --bin automation-ui</code></p>"#,
+            current_dir, possible_paths
+        )),
+    )
 }
 
 async fn options_handler() -> impl IntoResponse {
@@ -204,9 +234,13 @@ async fn process_acceptance_criteria(
 
     // Check if AI should be used
     let use_ai = request.use_ai.unwrap_or(false);
+    let use_vision = request.use_vision.unwrap_or(false);
 
-    if use_ai {
-        // AI-powered processing
+    // Force AI usage when Vision mode is enabled (Vision needs smart action generation)
+    let should_use_ai = use_ai || use_vision;
+
+    if should_use_ai {
+        // AI-powered processing (required for Vision mode)
         let api_key = request
             .openrouter_api_key
             .clone()
@@ -229,7 +263,6 @@ async fn process_acceptance_criteria(
                                 message: format!("Failed to initialize AI engine: {}", e),
                                 workflow_id: None,
                                 workflow: None,
-                                mcp_script: None,
                                 execution_report: None,
                                 execution_logs: None,
                                 ai_used: false,
@@ -245,22 +278,81 @@ async fn process_acceptance_criteria(
                 // Create acceptance criteria for AI
                 let criteria = create_acceptance_criteria_from_request(&request, &tags);
 
+                // Configure headless mode for AI execution
+                let headless_mode = request.headless_mode.unwrap_or(false);
+                if headless_mode {
+                    println!("🕶️ AI Engine: Running in headless mode (no visible browser window)");
+                } else {
+                    println!("🖥️ AI Engine: Running with visible browser window");
+                }
+
+                // Check if vision mode should be used with AI
+                let use_vision = request.use_vision.unwrap_or(false);
+                if use_vision {
+                    println!(
+                        "👁️ AI Engine: Vision mode enabled - will execute plan using AI Vision"
+                    );
+
+                    // Get vision API key (use same as main API key if vision key not provided)
+                    let vision_api_key = request
+                        .vision_api_key
+                        .clone()
+                        .or_else(|| Some(api_key.clone()))
+                        .filter(|key| !key.is_empty());
+
+                    if vision_api_key.is_none() {
+                        return (
+                            StatusCode::BAD_REQUEST,
+                            Json(ProcessACResponse {
+                                success: false,
+                                message: "Vision mode requires an API key for visual analysis. Please provide vision_api_key or ensure openrouter_api_key is set.".to_string(),
+                                workflow_id: None,
+                                workflow: None,
+                                execution_report: None,
+                                execution_logs: None,
+                                ai_used: true,
+                                ai_plan: None,
+                                ai_reasoning: None,
+                            }),
+                        );
+                    }
+                } else {
+                    println!("🤖 AI Engine: Using standard DOM-based execution");
+                }
+
+                // Configure AI engine with user preferences
+                ai_engine.set_headless(headless_mode);
+
+                // Configure vision mode if enabled
+                if use_vision {
+                    let vision_api_key = request
+                        .vision_api_key
+                        .clone()
+                        .or_else(|| Some(api_key.clone()));
+                    ai_engine.set_vision_mode(true, vision_api_key, request.vision_model.clone());
+                }
+
                 match ai_engine
                     .analyze_and_execute_ac(&criteria, request.execute_immediately.unwrap_or(false))
                     .await
                 {
                     Ok(ai_result) => {
+                        let message = if use_vision {
+                            "Successfully processed with AI + Vision mode! AI analyzed the scenario and executed using visual understanding.".to_string()
+                        } else {
+                            "Successfully processed with AI using DOM selectors.".to_string()
+                        };
+
                         return (
                             StatusCode::OK,
                             Json(ProcessACResponse {
                                 success: true,
-                                message: "Successfully processed with AI".to_string(),
+                                message,
                                 workflow_id: Some(format!(
                                     "ai_{}",
                                     uuid::Uuid::new_v4().to_string()[..8].to_string()
                                 )),
                                 workflow: None, // AI creates its own plan format
-                                mcp_script: Some(ai_result.mcp_script),
                                 execution_report: ai_result.execution_report,
                                 execution_logs: None, // AI doesn't use the new logging yet
                                 ai_used: true,
@@ -277,7 +369,6 @@ async fn process_acceptance_criteria(
                                 message: format!("AI processing failed: {}", e),
                                 workflow_id: None,
                                 workflow: None,
-                                mcp_script: None,
                                 execution_report: None,
                                 execution_logs: None,
                                 ai_used: true,
@@ -289,14 +380,19 @@ async fn process_acceptance_criteria(
                 }
             }
         } else {
+            let error_message = if use_vision {
+                "Vision mode requires AI processing which needs an OpenRouter API key. Please provide it in the form or set OPENROUTER_API_KEY environment variable.".to_string()
+            } else {
+                "OpenRouter API key required for AI processing. Please provide it in the form or set OPENROUTER_API_KEY environment variable.".to_string()
+            };
+
             return (
                 StatusCode::BAD_REQUEST,
                 Json(ProcessACResponse {
                     success: false,
-                    message: "OpenRouter API key required for AI processing. Please provide it in the form or set OPENROUTER_API_KEY environment variable.".to_string(),
+                    message: error_message,
                     workflow_id: None,
                     workflow: None,
-                    mcp_script: None,
                     execution_report: None,
                     execution_logs: None,
                     ai_used: false,
@@ -330,6 +426,15 @@ async fn process_acceptance_criteria(
             .join("\n")
     );
 
+    // Configure headless mode
+    let headless_mode = request.headless_mode.unwrap_or(false);
+    if headless_mode {
+        println!("🕶️ Running in headless mode (no visible browser window)");
+    } else {
+        println!("🖥️ Running with visible browser window");
+    }
+    app_state.integration.set_headless(headless_mode);
+
     // Check if vision mode is enabled
     let use_vision = request.use_vision.unwrap_or(false);
 
@@ -351,7 +456,6 @@ async fn process_acceptance_criteria(
                     message: "Vision mode requires API key. Please provide it in the form or set OPENROUTER_API_KEY environment variable.".to_string(),
                     workflow_id: None,
                     workflow: None,
-                    mcp_script: None,
                     execution_report: None,
                     execution_logs: None,
                     ai_used: false,
@@ -409,7 +513,6 @@ async fn process_acceptance_criteria(
                 message: response_message,
                 workflow_id: Some(result.workflow.id.clone()),
                 workflow: Some(result.workflow),
-                mcp_script: Some(result.mcp_script),
                 execution_report: result.execution_report,
                 execution_logs: result.execution_logs,
                 ai_used: false,
@@ -424,7 +527,6 @@ async fn process_acceptance_criteria(
                 message: format!("Failed to process: {}", e),
                 workflow_id: None,
                 workflow: None,
-                mcp_script: None,
                 execution_report: None,
                 execution_logs: None,
                 ai_used: false,
@@ -450,6 +552,7 @@ async fn process_acceptance_criteria_form(
             .cloned()
             .filter(|s| !s.is_empty()),
         execute_immediately: form_data.get("execute_immediately").map(|_| true),
+        headless_mode: form_data.get("headless_mode").map(|_| true),
         use_ai: form_data.get("use_ai").map(|_| true),
         openrouter_api_key: form_data
             .get("openrouter_api_key")
@@ -611,39 +714,9 @@ async fn execute_workflow(
     }
 }
 
-async fn get_script(
-    State(state): State<SharedState>,
-    axum::extract::Path(workflow_id): axum::extract::Path<String>,
-    Query(params): Query<HashMap<String, String>>,
-) -> impl IntoResponse {
-    let app_state = state.lock().await;
-
-    if let Some(workflow) = app_state.integration.get_workflow(&workflow_id) {
-        let format = params
-            .get("format")
-            .map(|s| s.as_str())
-            .unwrap_or("mcp_browser");
-        let script = app_state
-            .integration
-            .generate_browser_script(workflow, format);
-
-        (
-            StatusCode::OK,
-            [(axum::http::header::CONTENT_TYPE, "text/plain")],
-            script,
-        )
-    } else {
-        (
-            StatusCode::NOT_FOUND,
-            [(axum::http::header::CONTENT_TYPE, "text/plain")],
-            format!("Workflow not found: {}", workflow_id),
-        )
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EnvStatusResponse {
-    pub openrouter_key_configured: bool,
+    pub openrouter_configured: bool,
     pub openrouter_key_source: String,
 }
 
@@ -652,10 +725,24 @@ async fn get_env_status() -> impl IntoResponse {
         .ok()
         .filter(|key| !key.is_empty());
 
+    // Check if it's a placeholder key
+    let is_placeholder = openrouter_key
+        .as_ref()
+        .map(|key| {
+            key.contains("your-openrouter-key-here")
+                || key.contains("YOUR_ACTUAL_OPENROUTER_API_KEY_HERE")
+                || key == "sk-or-v1-your-openrouter-key-here"
+        })
+        .unwrap_or(false);
+
     let response = EnvStatusResponse {
-        openrouter_key_configured: openrouter_key.is_some(),
+        openrouter_configured: openrouter_key.is_some() && !is_placeholder,
         openrouter_key_source: if openrouter_key.is_some() {
-            "environment".to_string()
+            if is_placeholder {
+                "placeholder".to_string()
+            } else {
+                "environment".to_string()
+            }
         } else {
             "none".to_string()
         },

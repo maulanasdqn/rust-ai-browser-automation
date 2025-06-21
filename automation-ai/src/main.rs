@@ -1,10 +1,9 @@
 use automation_ai::AIAutomationEngine;
+use automation_api::AcceptanceCriteria;
 use automation_integration::examples::{
-    sample_login_acceptance_criteria,
-    sample_form_submission_criteria,
+    sample_form_submission_criteria, sample_login_acceptance_criteria,
     sample_shopping_cart_criteria,
 };
-use automation_api::AcceptanceCriteria;
 use std::io::{self, Write};
 
 #[tokio::main]
@@ -15,23 +14,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Get OpenRouter API key
     let api_key = get_api_key()?;
-    
+
     // Initialize AI engine
     let mut ai_engine = AIAutomationEngine::new(api_key, None)?;
-    
+
     // Show available models
     println!("📋 Available AI Models:");
     let models = ai_engine.get_available_models().await?;
     for (i, model) in models.iter().enumerate() {
         println!("  {}. {}", i + 1, model);
     }
-    
+
     // Model selection
-    print!("\nSelect model (1-{}, or Enter for default): ", models.len());
+    print!(
+        "\nSelect model (1-{}, or Enter for default): ",
+        models.len()
+    );
     io::stdout().flush()?;
     let mut input = String::new();
     io::stdin().read_line(&mut input)?;
-    
+
     if let Ok(choice) = input.trim().parse::<usize>() {
         if choice > 0 && choice <= models.len() {
             ai_engine.set_model(models[choice - 1].clone());
@@ -47,13 +49,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("  4. Custom AC (Enter your own)");
         println!("  5. Chat with AI");
         println!("  6. Exit");
-        
+
         print!("\nChoice (1-6): ");
         io::stdout().flush()?;
-        
+
         let mut choice = String::new();
         io::stdin().read_line(&mut choice)?;
-        
+
         match choice.trim() {
             "1" => {
                 let (title, feature, criteria_text, tags) = sample_login_acceptance_criteria();
@@ -94,17 +96,17 @@ fn get_api_key() -> Result<String, Box<dyn std::error::Error>> {
     if let Ok(key) = std::env::var("OPENROUTER_API_KEY") {
         return Ok(key);
     }
-    
+
     print!("🔑 Enter your OpenRouter API key: ");
     io::stdout().flush()?;
     let mut api_key = String::new();
     io::stdin().read_line(&mut api_key)?;
-    
+
     let api_key = api_key.trim().to_string();
     if api_key.is_empty() {
         return Err("API key cannot be empty".into());
     }
-    
+
     Ok(api_key)
 }
 
@@ -169,32 +171,35 @@ async fn run_ai_analysis(
     criteria: &AcceptanceCriteria,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("\n🤖 AI analyzing acceptance criteria...");
-    
+
     print!("Execute immediately? (y/N): ");
     io::stdout().flush()?;
     let mut execute_input = String::new();
     io::stdin().read_line(&mut execute_input)?;
     let execute_immediately = execute_input.trim().to_lowercase() == "y";
-    
-    match ai_engine.analyze_and_execute_ac(criteria, execute_immediately).await {
+
+    match ai_engine
+        .analyze_and_execute_ac(criteria, execute_immediately)
+        .await
+    {
         Ok(result) => {
             println!("\n✅ AI Analysis Complete!");
             println!("📋 Plan: {}", result.plan.title);
             println!("📄 Description: {}", result.plan.description);
-            println!("⏱️  Estimated Duration: {:.1}s", result.plan.estimated_duration);
+            println!(
+                "⏱️  Estimated Duration: {:.1}s",
+                result.plan.estimated_duration
+            );
             println!("🔧 Steps: {}", result.plan.steps.len());
             println!("✓ Assertions: {}", result.plan.assertions.len());
-            
+
             if let Some(report) = &result.execution_report {
                 println!("\n📊 Execution Results:");
                 println!("🎯 Success Rate: {:.1}%", report.success_rate() * 100.0);
                 println!("✅ Successful: {}", report.successful_steps);
                 println!("❌ Failed: {}", report.failed_steps);
             }
-            
-            println!("\n🔧 Generated MCP Browser Script:");
-            println!("{}", result.mcp_script);
-            
+
             println!("\n🧠 AI Reasoning:");
             if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&result.llm_reasoning) {
                 println!("{}", serde_json::to_string_pretty(&parsed)?);
@@ -206,23 +211,23 @@ async fn run_ai_analysis(
             println!("❌ AI Analysis failed: {}", e);
         }
     }
-    
+
     Ok(())
 }
 
 fn get_custom_criteria() -> Result<AcceptanceCriteria, Box<dyn std::error::Error>> {
     println!("\n📝 Enter Custom Acceptance Criteria:");
-    
+
     print!("Title: ");
     io::stdout().flush()?;
     let mut title = String::new();
     io::stdin().read_line(&mut title)?;
-    
+
     print!("Feature: ");
     io::stdout().flush()?;
     let mut feature = String::new();
     io::stdin().read_line(&mut feature)?;
-    
+
     println!("Criteria (Gherkin format, end with empty line):");
     let mut criteria_text = String::new();
     loop {
@@ -233,7 +238,7 @@ fn get_custom_criteria() -> Result<AcceptanceCriteria, Box<dyn std::error::Error
         }
         criteria_text.push_str(&line);
     }
-    
+
     print!("Tags (comma-separated): ");
     io::stdout().flush()?;
     let mut tags_input = String::new();
@@ -243,7 +248,7 @@ fn get_custom_criteria() -> Result<AcceptanceCriteria, Box<dyn std::error::Error
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect();
-    
+
     Ok(create_criteria(
         "custom_1",
         title.trim().to_string(),
@@ -257,23 +262,23 @@ async fn chat_with_ai(
     ai_engine: &mut AIAutomationEngine,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("\n💬 Chat with AI (type 'exit' to return):");
-    
+
     loop {
         print!("\nYou: ");
         io::stdout().flush()?;
-        
+
         let mut input = String::new();
         io::stdin().read_line(&mut input)?;
         let input = input.trim();
-        
+
         if input.to_lowercase() == "exit" {
             break;
         }
-        
+
         if input.is_empty() {
             continue;
         }
-        
+
         match ai_engine.chat_with_ai(input.to_string()).await {
             Ok(response) => {
                 println!("🤖 AI: {}", response);
@@ -283,6 +288,6 @@ async fn chat_with_ai(
             }
         }
     }
-    
+
     Ok(())
-} 
+}

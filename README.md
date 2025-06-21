@@ -6,7 +6,7 @@ Inspired by [Skyvern](https://github.com/Skyvern-AI/skyvern), this system combin
 
 ## ✨ Key Features
 
-### 👁️ **AI Vision Mode** (Like Skyvern)
+### 👁️ **AI Vision Mode**
 
 - **Visual Understanding**: AI analyzes screenshots to find elements visually
 - **Robust Automation**: Works even when websites change their HTML structure

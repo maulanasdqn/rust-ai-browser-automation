@@ -6,7 +6,7 @@ use reqwest;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::Duration;
-use thirtyfour::components::SelectElement;
+
 use thirtyfour::prelude::*;
 use tokio::sync::Mutex;
 
@@ -38,7 +38,6 @@ pub enum AutomationMode {
 pub struct ChromeAutomationEngine {
     driver: Option<WebDriver>,
     headless: bool,
-    timeout: Duration,
     logs: Arc<Mutex<Vec<AutomationLog>>>,
     verbose: bool,
     mode: AutomationMode,
@@ -51,12 +50,11 @@ impl ChromeAutomationEngine {
         Self {
             driver: None,
             headless,
-            timeout: Duration::from_secs(30),
             logs: Arc::new(Mutex::new(Vec::new())),
             verbose: true,
             mode: AutomationMode::Dom, // Default to DOM mode
             vision_api_key: None,
-            vision_model: "gpt-4o".to_string(), // GPT-4 with vision
+            vision_model: "anthropic/claude-3.5-sonnet".to_string(), // Claude has fewer safety restrictions
         }
     }
 
@@ -137,11 +135,6 @@ impl ChromeAutomationEngine {
     }
 
     pub async fn execute_browser_action(&mut self, action: &BrowserAction) -> Result<String> {
-        let driver = self
-            .driver
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("WebDriver not initialized"))?;
-
         self.log(
             "INFO",
             &format!("🔧 Executing action: {}", action.action_type),
@@ -162,127 +155,104 @@ impl ChromeAutomationEngine {
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("WebDriver not initialized"))?;
 
-        // Existing DOM-based implementation
+        self.log(
+            "INFO",
+            &format!("🔧 Executing action: {}", action.action_type),
+            Some("dom"),
+        )
+        .await;
+
         match action.action_type.as_str() {
             "navigate" => {
                 if let Some(url) = &action.url {
+                    let clean_url = self.clean_url(url);
                     self.log(
                         "INFO",
-                        &format!("🌐 Navigating to: {}", url),
+                        &format!("🌐 Navigating to: {}", clean_url),
                         Some("navigate"),
                     )
                     .await;
-                    driver.goto(url).await?;
-
-                    tokio::time::sleep(Duration::from_millis(2000)).await;
-
-                    let current_url = driver.current_url().await?.to_string();
-                    let result_msg = format!("Navigated to {}", current_url);
-                    self.log("SUCCESS", &format!("✅ {}", result_msg), Some("navigate"))
-                        .await;
-                    Ok(result_msg)
+                    driver.goto(&clean_url).await?;
+                    Ok(format!("Navigated to {}", clean_url))
                 } else {
-                    let error_msg = "Navigate action requires URL";
-                    self.log("ERROR", &format!("❌ {}", error_msg), Some("navigate"))
-                        .await;
-                    Err(anyhow::anyhow!(error_msg))
+                    Err(anyhow::anyhow!("No URL provided for navigate action"))
                 }
             }
             "click" => {
-                if let Some(selector) = &action.selector {
-                    self.log(
-                        "INFO",
-                        &format!("🖱️ Finding element to click: {}", selector),
-                        Some("click"),
-                    )
-                    .await;
+                let selector = self.resolve_element_selector(action).await?;
 
-                    let element = self.find_element_with_retry(driver, selector, 10).await?;
+                self.log(
+                    "INFO",
+                    &format!("🖱️ Clicking element: {}", selector),
+                    Some("click"),
+                )
+                .await;
 
-                    self.log("INFO", "📍 Scrolling element into view", Some("click"))
-                        .await;
-                    driver
-                        .execute(
-                            "arguments[0].scrollIntoView({block: 'center'});",
-                            vec![element.to_json()?],
-                        )
-                        .await?;
-                    tokio::time::sleep(Duration::from_millis(500)).await;
-
-                    self.log(
-                        "INFO",
-                        &format!("👆 Clicking element: {}", selector),
-                        Some("click"),
-                    )
-                    .await;
-                    element.click().await?;
-                    tokio::time::sleep(Duration::from_millis(1000)).await;
-
-                    let result_msg = format!("Clicked element: {}", selector);
-                    self.log("SUCCESS", &format!("✅ {}", result_msg), Some("click"))
-                        .await;
-                    Ok(result_msg)
-                } else {
-                    let error_msg = "Click action requires selector";
-                    self.log("ERROR", &format!("❌ {}", error_msg), Some("click"))
-                        .await;
-                    Err(anyhow::anyhow!(error_msg))
-                }
+                let element = self.find_element_with_retry(driver, &selector, 5).await?;
+                element.click().await?;
+                Ok("Clicked element".to_string())
             }
             "type" => {
-                if let Some(selector) = &action.selector {
-                    if let Some(text) = &action.text {
-                        self.log(
-                            "INFO",
-                            &format!("⌨️ Finding input field: {}", selector),
-                            Some("type"),
-                        )
-                        .await;
+                if let Some(text) = &action.text {
+                    let selector = self.resolve_element_selector(action).await?;
 
-                        let element = self.find_element_with_retry(driver, selector, 10).await?;
+                    self.log(
+                        "INFO",
+                        &format!("⌨️ Typing '{}' into: {}", text, selector),
+                        Some("type"),
+                    )
+                    .await;
 
-                        self.log("INFO", "🧹 Clearing existing text", Some("type"))
-                            .await;
-                        element.clear().await?;
-                        tokio::time::sleep(Duration::from_millis(300)).await;
-
-                        self.log(
-                            "INFO",
-                            &format!("⌨️ Typing '{}' into: {}", text, selector),
-                            Some("type"),
-                        )
-                        .await;
-                        element.send_keys(text).await?;
-                        tokio::time::sleep(Duration::from_millis(500)).await;
-
-                        let result_msg = format!("Typed '{}' into {}", text, selector);
-                        self.log("SUCCESS", &format!("✅ {}", result_msg), Some("type"))
-                            .await;
-                        Ok(result_msg)
-                    } else {
-                        let error_msg = "Type action requires text";
-                        self.log("ERROR", &format!("❌ {}", error_msg), Some("type"))
-                            .await;
-                        Err(anyhow::anyhow!(error_msg))
-                    }
+                    let element = self.find_element_with_retry(driver, &selector, 5).await?;
+                    element.clear().await?;
+                    element.send_keys(text).await?;
+                    Ok(format!("Typed '{}' into element", text))
                 } else {
-                    let error_msg = "Type action requires selector";
-                    self.log("ERROR", &format!("❌ {}", error_msg), Some("type"))
-                        .await;
-                    Err(anyhow::anyhow!(error_msg))
+                    Err(anyhow::anyhow!("No text provided for type action"))
                 }
             }
-            "screenshot" => {
-                self.log("INFO", "📸 Taking screenshot", Some("screenshot"))
+            "select" => {
+                let selector = self.resolve_element_selector(action).await?;
+                if let Some(value) = &action.text {
+                    self.log(
+                        "INFO",
+                        &format!("📋 Selecting '{}' from: {}", value, selector),
+                        Some("select"),
+                    )
                     .await;
-                let screenshot = driver.screenshot_as_png().await?;
-                let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-                let filename = format!("screenshot_{}.png", timestamp);
-                std::fs::write(&filename, screenshot)?;
-                let result_msg = format!("Screenshot saved as {}", filename);
-                self.log("SUCCESS", &format!("✅ {}", result_msg), Some("screenshot"))
-                    .await;
-                Ok(result_msg)
+
+                    let select_element = self.find_element_with_retry(driver, &selector, 5).await?;
+
+                    // Try different selection methods
+                    let options = select_element.find_all(By::Tag("option")).await?;
+                    let mut selected = false;
+
+                    for option in options {
+                        let option_text = option.text().await.unwrap_or_default();
+                        let option_value = option
+                            .get_attribute("value")
+                            .await
+                            .unwrap_or_default()
+                            .unwrap_or_default();
+
+                        if option_text.contains(value) || option_value.contains(value) {
+                            option.click().await?;
+                            selected = true;
+                            break;
+                        }
+                    }
+
+                    if !selected {
+                        return Err(anyhow::anyhow!(
+                            "Could not find option '{}' in select element",
+                            value
+                        ));
+                    }
+
+                    Ok(format!("Selected '{}' from: {}", value, selector))
+                } else {
+                    Err(anyhow::anyhow!("No value provided for select action"))
+                }
             }
             "wait" => {
                 if let Some(condition) = &action.wait_condition {
@@ -293,158 +263,118 @@ impl ChromeAutomationEngine {
                     )
                     .await;
 
-                    let result = match condition.as_str() {
+                    match condition.as_str() {
                         "page_load" => {
-                            // Wait for page to load completely
-                            tokio::time::sleep(Duration::from_millis(3000)).await;
-                            self.log("SUCCESS", "✅ Page load wait completed", Some("wait"))
-                                .await;
-                            Ok("Page load wait completed".to_string())
+                            tokio::time::sleep(Duration::from_secs(3)).await;
                         }
                         "element_visible" => {
-                            if let Some(selector) = &action.selector {
-                                match self.wait_for_element_visible(driver, selector, 10).await {
-                                    Ok(_) => {
-                                        let msg = format!("Element '{}' is now visible", selector);
-                                        self.log("SUCCESS", &format!("✅ {}", msg), Some("wait"))
-                                            .await;
-                                        Ok(msg)
-                                    }
-                                    Err(e) => {
-                                        let msg = format!(
-                                            "Element '{}' did not become visible: {}",
-                                            selector, e
-                                        );
-                                        self.log("ERROR", &format!("❌ {}", msg), Some("wait"))
-                                            .await;
-                                        Err(anyhow::anyhow!(msg))
-                                    }
-                                }
-                            } else {
-                                // Generic wait if no selector provided
-                                tokio::time::sleep(Duration::from_millis(2000)).await;
-                                self.log(
-                                    "SUCCESS",
-                                    "✅ Element visibility wait completed",
-                                    Some("wait"),
-                                )
-                                .await;
-                                Ok("Element visibility wait completed".to_string())
-                            }
+                            let selector = self.resolve_element_selector(action).await?;
+                            self.wait_for_element_visible(driver, &selector, 10).await?;
                         }
                         "element_clickable" => {
-                            if let Some(selector) = &action.selector {
-                                // Wait for element to be both visible and clickable
-                                match self.find_element_with_retry(driver, selector, 10).await {
-                                    Ok(element) => {
-                                        // Additional check for clickability
-                                        let is_enabled =
-                                            element.is_enabled().await.unwrap_or(false);
-                                        if is_enabled {
-                                            let msg =
-                                                format!("Element '{}' is now clickable", selector);
-                                            self.log(
-                                                "SUCCESS",
-                                                &format!("✅ {}", msg),
-                                                Some("wait"),
-                                            )
-                                            .await;
-                                            Ok(msg)
-                                        } else {
-                                            let msg = format!(
-                                                "Element '{}' is visible but not clickable",
-                                                selector
-                                            );
-                                            self.log("WARN", &format!("⚠️ {}", msg), Some("wait"))
-                                                .await;
-                                            Ok(msg)
-                                        }
-                                    }
-                                    Err(e) => {
-                                        let msg = format!(
-                                            "Element '{}' not found for clickability check: {}",
-                                            selector, e
-                                        );
-                                        self.log("ERROR", &format!("❌ {}", msg), Some("wait"))
-                                            .await;
-                                        Err(anyhow::anyhow!(msg))
-                                    }
-                                }
-                            } else {
-                                tokio::time::sleep(Duration::from_millis(1500)).await;
-                                self.log("SUCCESS", "✅ Clickability wait completed", Some("wait"))
-                                    .await;
-                                Ok("Clickability wait completed".to_string())
+                            let selector = self.resolve_element_selector(action).await?;
+                            self.wait_for_element_visible(driver, &selector, 10).await?;
+                            let element =
+                                self.find_element_with_retry(driver, &selector, 3).await?;
+                            if !element.is_enabled().await? {
+                                return Err(anyhow::anyhow!(
+                                    "Element is not clickable: {}",
+                                    selector
+                                ));
                             }
                         }
                         "page_stable" => {
-                            // Wait for page to be stable (no more loading)
-                            self.log("INFO", "🔄 Waiting for page to stabilize", Some("wait"))
-                                .await;
-
-                            // Wait for any loading indicators to disappear
-                            tokio::time::sleep(Duration::from_millis(2500)).await;
-
-                            // Check if page is still loading
-                            let ready_state_result =
-                                driver.execute("return document.readyState;", vec![]).await;
-
-                            let is_complete = match ready_state_result {
-                                Ok(script_result) => {
-                                    // Try to convert the result to string and check if it's "complete"
-                                    script_result.json().as_str().unwrap_or("unknown") == "complete"
-                                }
-                                Err(_) => true, // Assume complete if we can't check
-                            };
-
-                            if is_complete {
-                                self.log(
-                                    "SUCCESS",
-                                    "✅ Page stabilized successfully",
-                                    Some("wait"),
-                                )
-                                .await;
-                                Ok("Page stabilized successfully".to_string())
-                            } else {
-                                self.log("WARN", "⚠️ Page may still be loading", Some("wait"))
-                                    .await;
-                                Ok("Page stabilization attempted".to_string())
+                            tokio::time::sleep(Duration::from_secs(2)).await;
+                            // Check document.readyState
+                            let ready_state: String = driver
+                                .execute("return document.readyState", vec![])
+                                .await?
+                                .convert()?;
+                            if ready_state != "complete" {
+                                tokio::time::sleep(Duration::from_secs(1)).await;
                             }
                         }
-                        _ => {
-                            // Generic wait for unknown conditions (fallback to time-based)
-                            let wait_time = match condition.parse::<u64>() {
-                                Ok(seconds) => seconds * 1000, // Convert seconds to milliseconds
-                                Err(_) => 2000,                // Default 2 seconds
-                            };
-
-                            tokio::time::sleep(Duration::from_millis(wait_time)).await;
-                            let msg =
-                                format!("Generic wait completed for condition: {}", condition);
-                            self.log("SUCCESS", &format!("✅ {}", msg), Some("wait"))
-                                .await;
-                            Ok(msg)
+                        "network_idle" => {
+                            tokio::time::sleep(Duration::from_secs(2)).await;
                         }
-                    };
-
-                    result
+                        _ => {
+                            // Try to parse as a number of seconds
+                            if let Ok(seconds) = condition.parse::<u64>() {
+                                tokio::time::sleep(Duration::from_secs(seconds)).await;
+                            } else {
+                                tokio::time::sleep(Duration::from_secs(2)).await;
+                            }
+                        }
+                    }
+                    Ok(format!("Wait completed for condition: {}", condition))
                 } else {
-                    // Default wait if no condition specified
-                    self.log("INFO", "⏱️ Performing default wait (2s)", Some("wait"))
-                        .await;
-                    tokio::time::sleep(Duration::from_millis(2000)).await;
-                    let result_msg = "Default wait completed";
-                    self.log("SUCCESS", &format!("✅ {}", result_msg), Some("wait"))
-                        .await;
-                    Ok(result_msg.to_string())
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    Ok("Default wait completed".to_string())
                 }
             }
-            _ => {
-                let error_msg = format!("Unknown action type: {}", action.action_type);
-                self.log("ERROR", &format!("❌ {}", error_msg), Some("unknown"))
-                    .await;
-                Err(anyhow::anyhow!(error_msg))
+            "screenshot" => {
+                let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+                let filename = format!("dom_screenshot_{}.png", timestamp);
+                self.log(
+                    "INFO",
+                    &format!("📸 Taking DOM screenshot: {}", filename),
+                    Some("screenshot"),
+                )
+                .await;
+                let saved_filename = self.take_screenshot(Some(&filename)).await?;
+                Ok(format!("Screenshot saved as {}", saved_filename))
             }
+            _ => Err(anyhow::anyhow!(
+                "Unknown DOM action type: {}",
+                action.action_type
+            )),
+        }
+    }
+
+    // New method to resolve element selector using AI HTML analysis when needed
+    async fn resolve_element_selector(&self, action: &BrowserAction) -> Result<String> {
+        // If we have a selector, use it directly
+        if let Some(selector) = &action.selector {
+            return Ok(selector.clone());
+        }
+
+        // If we have an element description, use AI HTML analysis to get selector
+        if let Some(description) = &action.element_description {
+            self.log(
+                "INFO",
+                &format!("🔍 Using AI HTML analysis to find: {}", description),
+                Some("ai_html"),
+            )
+            .await;
+
+            // Determine element type from action
+            let element_type = match action.action_type.as_str() {
+                "type" => "input",
+                "click" => "button",
+                "select" => "select",
+                _ => "element",
+            };
+
+            // Use AI to analyze HTML and get selector (much cheaper than coordinates)
+            let selector = self
+                .get_ai_selector_for_element("", description, element_type)
+                .await?;
+
+            self.log(
+                "SUCCESS",
+                &format!(
+                    "✅ AI HTML analysis found selector '{}' for '{}'",
+                    selector, description
+                ),
+                Some("ai_html"),
+            )
+            .await;
+
+            Ok(selector)
+        } else {
+            Err(anyhow::anyhow!(
+                "No selector or element description provided"
+            ))
         }
     }
 
@@ -456,28 +386,40 @@ impl ChromeAutomationEngine {
 
         self.log(
             "INFO",
-            "👁️ Using AI Vision to understand the page",
-            Some("vision"),
+            "🧠 Using AI DOM Inspection to find precise selectors",
+            Some("ai_dom"),
         )
         .await;
 
-        // Take screenshot for vision analysis
+        // Take screenshot for AI analysis
         let screenshot_data = driver.screenshot_as_png().await?;
         let screenshot_base64 = general_purpose::STANDARD.encode(&screenshot_data);
+
+        // Save debug screenshot
+        let debug_timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+        let debug_filename = format!("debug_ai_dom_{}.png", debug_timestamp);
+        std::fs::write(&debug_filename, &screenshot_data)?;
+
+        self.log(
+            "INFO",
+            &format!("📸 Debug screenshot saved: {}", debug_filename),
+            Some("ai_dom"),
+        )
+        .await;
 
         match action.action_type.as_str() {
             "navigate" => {
                 if let Some(url) = &action.url {
+                    let clean_url = self.clean_url(url);
                     self.log(
                         "INFO",
-                        &format!("🌐 Navigating to: {}", url),
+                        &format!("🌐 Navigating to: {}", clean_url),
                         Some("navigate"),
                     )
                     .await;
-                    driver.goto(url).await?;
+                    driver.goto(&clean_url).await?;
                     tokio::time::sleep(Duration::from_millis(3000)).await;
-
-                    let result_msg = format!("Navigated to {}", url);
+                    let result_msg = format!("Navigated to {}", clean_url);
                     self.log("SUCCESS", &format!("✅ {}", result_msg), Some("navigate"))
                         .await;
                     Ok(result_msg)
@@ -485,119 +427,167 @@ impl ChromeAutomationEngine {
                     Err(anyhow::anyhow!("Navigate action requires URL"))
                 }
             }
-            "click" => {
-                let description = action.selector.as_deref().unwrap_or("the element");
-                self.log(
-                    "INFO",
-                    &format!("👁️ AI Vision: Looking for '{}' to click", description),
-                    Some("vision"),
-                )
-                .await;
 
-                let coordinates = self
-                    .get_element_coordinates_via_vision(
-                        &screenshot_base64,
-                        &format!("Find the coordinates to click on: {}", description),
-                    )
-                    .await?;
-
-                self.log(
-                    "INFO",
-                    &format!(
-                        "📍 AI found coordinates: ({}, {})",
-                        coordinates.0, coordinates.1
-                    ),
-                    Some("vision"),
-                )
-                .await;
-
-                // Perform click at coordinates
-                self.click_at_coordinates(driver, coordinates.0, coordinates.1)
-                    .await?;
-
-                let result_msg = format!(
-                    "Vision-clicked at coordinates ({}, {})",
-                    coordinates.0, coordinates.1
-                );
-                self.log("SUCCESS", &format!("✅ {}", result_msg), Some("vision"))
-                    .await;
-                Ok(result_msg)
-            }
             "type" => {
                 if let Some(text) = &action.text {
-                    let description = action.selector.as_deref().unwrap_or("the input field");
-                    self.log(
-                        "INFO",
-                        &format!("👁️ AI Vision: Looking for '{}' to type into", description),
-                        Some("vision"),
-                    )
-                    .await;
+                    let element_description = action
+                        .element_description
+                        .as_deref()
+                        .unwrap_or("input field");
 
-                    let coordinates = self
-                        .get_element_coordinates_via_vision(
-                            &screenshot_base64,
-                            &format!("Find the coordinates of the input field: {}", description),
-                        )
-                        .await?;
-
-                    // Click on the input field first
-                    self.click_at_coordinates(driver, coordinates.0, coordinates.1)
-                        .await?;
-                    tokio::time::sleep(Duration::from_millis(500)).await;
-
-                    // Clear existing text and type new text
                     self.log(
                         "INFO",
                         &format!(
-                            "⌨️ Vision-typing '{}' at coordinates ({}, {})",
-                            text, coordinates.0, coordinates.1
+                            "🧠 AI DOM Inspection: Finding selector for '{}'",
+                            element_description
                         ),
-                        Some("vision"),
+                        Some("ai_dom"),
                     )
                     .await;
-                    driver
-                        .action_chain()
-                        .key_down(Key::Control)
-                        .send_keys("a")
-                        .key_up(Key::Control)
-                        .perform()
-                        .await?;
-                    driver.action_chain().send_keys(text).perform().await?;
 
-                    let result_msg = format!(
-                        "Vision-typed '{}' at coordinates ({}, {})",
-                        text, coordinates.0, coordinates.1
-                    );
-                    self.log("SUCCESS", &format!("✅ {}", result_msg), Some("vision"))
-                        .await;
-                    Ok(result_msg)
+                    // Get AI-generated selector
+                    let selector = self
+                        .get_ai_selector_for_element(
+                            &screenshot_base64,
+                            element_description,
+                            "input",
+                        )
+                        .await?;
+
+                    self.log(
+                        "INFO",
+                        &format!("🎯 AI found selector: {}", selector),
+                        Some("ai_dom"),
+                    )
+                    .await;
+
+                    // Use traditional DOM automation with AI-found selector
+                    let dom_action = BrowserAction {
+                        action_type: "type".to_string(),
+                        selector: Some(selector),
+                        element_description: None,
+                        text: Some(text.clone()),
+                        url: None,
+                        wait_condition: None,
+                        screenshot: false,
+                    };
+
+                    match self.execute_dom_action(&dom_action).await {
+                        Ok(result) => {
+                            self.log(
+                                "SUCCESS",
+                                &format!("✅ AI DOM typed '{}' successfully", text),
+                                Some("ai_dom"),
+                            )
+                            .await;
+                            Ok(result)
+                        }
+                        Err(e) => {
+                            self.log(
+                                "ERROR",
+                                &format!("❌ AI DOM typing failed: {}", e),
+                                Some("ai_dom"),
+                            )
+                            .await;
+                            Err(e)
+                        }
+                    }
                 } else {
                     Err(anyhow::anyhow!("Type action requires text"))
                 }
             }
+
+            "click" => {
+                let element_description = action
+                    .element_description
+                    .as_deref()
+                    .unwrap_or("clickable element");
+
+                self.log(
+                    "INFO",
+                    &format!(
+                        "🧠 AI DOM Inspection: Finding selector for '{}'",
+                        element_description
+                    ),
+                    Some("ai_dom"),
+                )
+                .await;
+
+                // Get AI-generated selector
+                let selector = self
+                    .get_ai_selector_for_element(&screenshot_base64, element_description, "button")
+                    .await?;
+
+                self.log(
+                    "INFO",
+                    &format!("🎯 AI found selector: {}", selector),
+                    Some("ai_dom"),
+                )
+                .await;
+
+                // Use traditional DOM automation with AI-found selector
+                let dom_action = BrowserAction {
+                    action_type: "click".to_string(),
+                    selector: Some(selector),
+                    element_description: None,
+                    text: None,
+                    url: None,
+                    wait_condition: None,
+                    screenshot: false,
+                };
+
+                match self.execute_dom_action(&dom_action).await {
+                    Ok(result) => {
+                        self.log("SUCCESS", "✅ AI DOM click successful", Some("ai_dom"))
+                            .await;
+                        Ok(result)
+                    }
+                    Err(e) => {
+                        self.log(
+                            "ERROR",
+                            &format!("❌ AI DOM click failed: {}", e),
+                            Some("ai_dom"),
+                        )
+                        .await;
+                        Err(e)
+                    }
+                }
+            }
+
+            "wait" => {
+                // Wait actions don't need AI inspection - use DOM implementation
+                self.log(
+                    "INFO",
+                    "⏱️ AI DOM mode: Using standard wait implementation",
+                    Some("ai_dom"),
+                )
+                .await;
+                self.execute_dom_action(action).await
+            }
+
             "screenshot" => {
                 self.log(
                     "INFO",
-                    "📸 Taking vision-enhanced screenshot",
+                    "📸 Taking AI DOM enhanced screenshot",
                     Some("screenshot"),
                 )
                 .await;
+                let screenshot_data = driver.screenshot_as_png().await?;
                 let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-                let filename = format!("vision_screenshot_{}.png", timestamp);
+                let filename = format!("ai_dom_screenshot_{}.png", timestamp);
                 std::fs::write(&filename, screenshot_data)?;
-
-                let result_msg = format!("Vision screenshot saved as {}", filename);
+                let result_msg = format!("AI DOM screenshot saved as {}", filename);
                 self.log("SUCCESS", &format!("✅ {}", result_msg), Some("screenshot"))
                     .await;
                 Ok(result_msg)
             }
-            "wait" => {
-                // Vision mode handles wait actions the same as DOM mode
-                self.execute_dom_action(action).await
-            }
+
             _ => {
-                let error_msg = format!("Vision mode: Unknown action type: {}", action.action_type);
-                self.log("ERROR", &format!("❌ {}", error_msg), Some("vision"))
+                let error_msg = format!(
+                    "Unsupported action type for AI DOM mode: {}",
+                    action.action_type
+                );
+                self.log("ERROR", &format!("❌ {}", error_msg), Some("ai_dom"))
                     .await;
                 Err(anyhow::anyhow!(error_msg))
             }
@@ -781,6 +771,13 @@ impl ChromeAutomationEngine {
     async fn parse_coordinates_from_response(&self, response: &str) -> Result<(i32, i32)> {
         let cleaned = response.trim();
 
+        self.log(
+            "INFO",
+            &format!("🔍 Parsing coordinates from AI response: '{}'", cleaned),
+            Some("vision"),
+        )
+        .await;
+
         // Try different coordinate formats
         let patterns = vec![
             // Standard x,y format
@@ -806,9 +803,9 @@ impl ChromeAutomationEngine {
                             // Validate coordinates are within reasonable screen bounds
                             if x >= 0 && x <= 3840 && y >= 0 && y <= 2160 {
                                 self.log(
-                                    "INFO",
+                                    "SUCCESS",
                                     &format!(
-                                        "📍 Parsed coordinates using pattern '{}': ({}, {})",
+                                        "✅ Parsed coordinates using pattern '{}': ({}, {})",
                                         pattern, x, y
                                     ),
                                     Some("vision"),
@@ -842,18 +839,21 @@ impl ChromeAutomationEngine {
             }
         }
 
-        // Ultimate fallback - return center of screen
+        // CRITICAL: Don't fall back to center - return error instead
         self.log(
             "ERROR",
             &format!(
-                "❌ Could not parse coordinates from: '{}'. Using screen center as fallback.",
+                "❌ VISION FAILED: Could not parse valid coordinates from: '{}'. This action will be skipped to prevent random clicking.",
                 cleaned
             ),
             Some("vision"),
         )
         .await;
 
-        Ok((960, 540)) // Center of 1920x1080 screen
+        Err(anyhow::anyhow!(
+            "Vision AI failed to provide valid coordinates. Response was: '{}'",
+            cleaned
+        ))
     }
 
     async fn click_at_coordinates(&self, driver: &WebDriver, x: i32, y: i32) -> Result<()> {
@@ -1037,6 +1037,58 @@ impl ChromeAutomationEngine {
         .await;
 
         let result = match assertion_type {
+            "login_success" => {
+                // Comprehensive login success detection
+                let current_url = driver.current_url().await?.to_string();
+                let page_source = driver.source().await?;
+
+                // Check multiple indicators of login success
+                let url_changed = !current_url.contains("/login") && !current_url.contains("/auth");
+                let has_dashboard = current_url.contains("/dashboard")
+                    || current_url.contains("/home")
+                    || current_url.contains("/app");
+                let no_login_form =
+                    !page_source.contains("type=\"password\"") || !page_source.contains("login");
+                let has_success_indicators = page_source.contains("dashboard")
+                    || page_source.contains("welcome")
+                    || page_source.contains("logout");
+
+                self.log(
+                    "INFO",
+                    &format!(
+                        "🔍 Login check - URL: {}, Changed: {}, Dashboard: {}, No form: {}, Success indicators: {}",
+                        current_url, url_changed, has_dashboard, no_login_form, has_success_indicators
+                    ),
+                    Some("assertion"),
+                )
+                .await;
+
+                if url_changed || has_dashboard || (no_login_form && has_success_indicators) {
+                    Ok(())
+                } else {
+                    Err(anyhow::anyhow!(
+                        "Login failed - still on login page. Current URL: {}",
+                        current_url
+                    ))
+                }
+            }
+            "login_failure" => {
+                // Check if we're still on login page (indicating failure)
+                let current_url = driver.current_url().await?.to_string();
+                let page_source = driver.source().await?;
+
+                if current_url.contains("/login")
+                    || current_url.contains("/auth")
+                    || page_source.contains("type=\"password\"")
+                {
+                    Ok(()) // We're still on login page, so login failed as expected
+                } else {
+                    Err(anyhow::anyhow!(
+                        "Expected login failure but login succeeded. Current URL: {}",
+                        current_url
+                    ))
+                }
+            }
             "element_visible" => {
                 let element = self
                     .find_element_with_retry(driver, assertion_value, 5)
@@ -1167,6 +1219,213 @@ impl ChromeAutomationEngine {
 
     pub fn set_verbose(&mut self, verbose: bool) {
         self.verbose = verbose;
+    }
+
+    fn clean_url(&self, url: &str) -> String {
+        // Remove surrounding quotes and whitespace
+        url.trim()
+            .trim_matches('"')
+            .trim_matches('\'')
+            .trim()
+            .to_string()
+    }
+
+    async fn get_ai_selector_for_element(
+        &self,
+        screenshot_base64: &str,
+        element_description: &str,
+        element_type: &str,
+    ) -> Result<String> {
+        self.log(
+            "INFO",
+            "🧠 Using AI to analyze page HTML structure",
+            Some("ai_html"),
+        )
+        .await;
+
+        // Get page HTML source (much cheaper than screenshots)
+        let driver = self
+            .driver
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("WebDriver not initialized"))?;
+
+        let page_html = driver.source().await?;
+
+        // Truncate HTML to avoid huge token costs (keep first 8000 chars which usually contains forms)
+        let truncated_html = if page_html.len() > 8000 {
+            format!("{}...[truncated]", &page_html[..8000])
+        } else {
+            page_html
+        };
+
+        let vision_api_key = self
+            .vision_api_key
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("API key not configured for HTML analysis"))?;
+
+        let vision_model = &self.vision_model;
+
+        let prompt = format!(
+            r#"You are a CSS selector generator. Analyze this HTML and return ONLY a valid CSS selector for: {}
+
+HTML snippet:
+{}
+
+CRITICAL RULES:
+1. Return ONLY a CSS selector - NO explanations, NO text, NO markdown
+2. If you cannot find the element, return one of these fallback selectors:
+   - For login buttons: button[type="submit"]
+   - For email inputs: input[type="email"] 
+   - For password inputs: input[type="password"]
+   - For dashboard elements: .dashboard, #dashboard, .main-content, .content
+   - For general elements: div, span, *
+
+Examples of VALID responses:
+input[type="email"]
+button[type="submit"]
+.dashboard
+#main-content
+
+Examples of INVALID responses (DO NOT DO THIS):
+"I cannot find the element"
+"Based on the HTML provided..."
+```css
+selector
+```
+
+Return only the selector:"#,
+            element_description, truncated_html
+        );
+
+        let payload = json!({
+            "model": vision_model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            "max_tokens": 100,
+            "temperature": 0.1
+        });
+
+        let client = reqwest::Client::new();
+        let response = client
+            .post("https://openrouter.ai/api/v1/chat/completions")
+            .header("Authorization", format!("Bearer {}", vision_api_key))
+            .header("Content-Type", "application/json")
+            .header("HTTP-Referer", "https://ac-automation.local")
+            .header("X-Title", "AC Automation HTML Analysis")
+            .json(&payload)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
+
+            // Fallback to common selectors if AI fails
+            self.log(
+                "WARN",
+                "⚠️ AI HTML analysis failed, using fallback selectors",
+                Some("ai_html"),
+            )
+            .await;
+
+            return Ok(self.get_fallback_selector(element_description, element_type));
+        }
+
+        let response_json: serde_json::Value = response.json().await?;
+
+        if let Some(content) = response_json["choices"][0]["message"]["content"].as_str() {
+            let selector = content.trim().to_string();
+
+            self.log(
+                "INFO",
+                &format!("🧠 AI HTML analysis result: '{}'", selector),
+                Some("ai_html"),
+            )
+            .await;
+
+            // Clean and validate the selector
+            let cleaned_selector = self.extract_valid_selector(&selector, element_description);
+
+            // Check if it's a valid selector (not an explanation)
+            if cleaned_selector.len() > 100
+                || cleaned_selector.contains("cannot find")
+                || cleaned_selector.contains("provided")
+            {
+                self.log(
+                    "WARN",
+                    "⚠️ AI returned explanation instead of selector, using fallback",
+                    Some("ai_html"),
+                )
+                .await;
+                return Ok(self.get_fallback_selector(element_description, ""));
+            }
+
+            self.log(
+                "SUCCESS",
+                &format!("✅ AI HTML found selector: {}", cleaned_selector),
+                Some("ai_html"),
+            )
+            .await;
+
+            Ok(cleaned_selector)
+        } else {
+            self.log(
+                "WARN",
+                "⚠️ AI HTML analysis returned no result, using fallback",
+                Some("ai_html"),
+            )
+            .await;
+            Ok(self.get_fallback_selector(element_description, ""))
+        }
+    }
+
+    fn get_fallback_selector(&self, element_description: &str, element_type: &str) -> String {
+        let desc = element_description.to_lowercase();
+
+        // Smart fallback selectors based on description
+        if desc.contains("email") {
+            "input[type=\"email\"]".to_string()
+        } else if desc.contains("password") {
+            "input[type=\"password\"]".to_string()
+        } else if desc.contains("login") || desc.contains("submit") || desc.contains("sign in") {
+            "button[type=\"submit\"]".to_string()
+        } else if element_type == "input" {
+            "input".to_string()
+        } else if element_type == "button" {
+            "button".to_string()
+        } else {
+            "*".to_string()
+        }
+    }
+
+    fn extract_valid_selector(&self, selector: &str, element_description: &str) -> String {
+        // Clean and validate the selector
+        let cleaned_selector = selector
+            .trim()
+            .trim_matches('"')
+            .trim_matches('`')
+            .replace("CSS:", "")
+            .replace("XPath:", "")
+            .trim()
+            .to_string();
+
+        // Validate the selector isn't jQuery syntax or an explanation
+        if cleaned_selector.contains(":contains(")
+            || cleaned_selector.len() > 100
+            || cleaned_selector.contains("cannot find")
+            || cleaned_selector.contains("provided")
+            || cleaned_selector.contains("Based on")
+        {
+            return self.get_fallback_selector(element_description, "");
+        }
+
+        cleaned_selector
     }
 }
 

@@ -1,6 +1,6 @@
 use anyhow::Result;
 use automation_api::{ACAutomationProcessor, AcceptanceCriteria, AutomationWorkflow};
-use automation_browser::{AutomationExecutor, AutomationLog, AutomationMode, ExecutionReport};
+use automation_browser::{AutomationExecutor, AutomationLog, ExecutionReport};
 use uuid::Uuid;
 
 #[derive(Debug)]
@@ -118,15 +118,6 @@ impl ACAutomationIntegration {
         self.processor.get_workflow(workflow_id)
     }
 
-    pub fn generate_browser_script(
-        &self,
-        workflow: &AutomationWorkflow,
-        script_format: &str,
-    ) -> String {
-        self.processor
-            .generate_browser_script(workflow, script_format)
-    }
-
     pub async fn full_ac_to_automation_pipeline(
         &mut self,
         title: String,
@@ -177,10 +168,7 @@ impl ACAutomationIntegration {
         // Step 2: Convert to automation workflow
         let workflow = self.convert_to_automation_workflow(&criteria.id)?;
 
-        // Step 3: Generate browser script (optional)
-        let mcp_script = self.generate_browser_script(&workflow, "mcp_browser");
-
-        // Step 4: Execute if requested (with vision config)
+        // Step 3: Execute if requested (with vision config)
         let (execution_report, execution_logs) = if execute_immediately {
             let (report, logs) = if use_vision {
                 self.execute_automation_workflow_with_vision_config(
@@ -202,7 +190,6 @@ impl ACAutomationIntegration {
         Ok(PipelineResult {
             criteria,
             workflow,
-            mcp_script,
             execution_report,
             execution_logs,
         })
@@ -221,7 +208,6 @@ impl ACAutomationIntegration {
 pub struct PipelineResult {
     pub criteria: AcceptanceCriteria,
     pub workflow: AutomationWorkflow,
-    pub mcp_script: String,
     pub execution_report: Option<ExecutionReport>,
     pub execution_logs: Option<Vec<AutomationLog>>,
 }
@@ -261,21 +247,6 @@ impl PipelineResult {
             if logs.len() > 10 {
                 println!("... and {} more log entries", logs.len() - 10);
             }
-        }
-
-        println!("\n🔧 Generated MCP Browser Script Preview:");
-        let script_preview: String = self
-            .mcp_script
-            .lines()
-            .take(10)
-            .collect::<Vec<_>>()
-            .join("\n");
-        println!("{}", script_preview);
-        if self.mcp_script.lines().count() > 10 {
-            println!(
-                "... (truncated, {} total lines)",
-                self.mcp_script.lines().count()
-            );
         }
 
         println!("\n==========================================\n");
