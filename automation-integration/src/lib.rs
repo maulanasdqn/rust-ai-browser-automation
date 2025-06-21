@@ -1,6 +1,6 @@
 use anyhow::Result;
 use automation_api::{ACAutomationProcessor, AcceptanceCriteria, AutomationWorkflow};
-use automation_browser::{AutomationExecutor, ExecutionReport};
+use automation_browser::{AutomationExecutor, AutomationLog, AutomationMode, ExecutionReport};
 use uuid::Uuid;
 
 #[derive(Debug)]
@@ -53,15 +53,61 @@ impl ACAutomationIntegration {
     pub async fn execute_automation_workflow(
         &mut self,
         workflow: &AutomationWorkflow,
-    ) -> Result<ExecutionReport> {
+    ) -> Result<(ExecutionReport, Vec<AutomationLog>)> {
         println!("🚀 Executing automation workflow: {}", workflow.name);
 
-        let report = self.executor.execute_workflow(workflow).await?;
+        let (report, logs) = self.executor.execute_workflow(workflow).await?;
         println!(
             "📊 Workflow execution completed with {}% success rate",
             (report.success_rate() * 100.0).round()
         );
-        Ok(report)
+        Ok((report, logs))
+    }
+
+    pub async fn execute_automation_workflow_with_vision_config(
+        &mut self,
+        workflow: &AutomationWorkflow,
+        use_vision: bool,
+        automation_mode: Option<String>,
+        vision_api_key: Option<String>,
+        vision_model: Option<String>,
+    ) -> Result<(ExecutionReport, Vec<AutomationLog>)> {
+        println!(
+            "🚀 Executing automation workflow with vision config: {}",
+            workflow.name
+        );
+
+        // Configure executor based on vision settings
+        if use_vision && vision_api_key.is_some() {
+            let api_key = vision_api_key.unwrap();
+            let mode = automation_mode.as_deref().unwrap_or("hybrid");
+
+            self.executor = match mode {
+                "vision" => {
+                    println!("👁️ Using Vision Mode (AI Visual Understanding)");
+                    AutomationExecutor::new()?
+                        .with_vision_mode(api_key, vision_model)
+                        .with_headless(false) // Vision works better with visible browser
+                }
+                "hybrid" => {
+                    println!("🔀 Using Hybrid Mode (DOM + Vision Fallback)");
+                    AutomationExecutor::new()?
+                        .with_hybrid_mode(api_key, vision_model)
+                        .with_headless(false)
+                }
+                _ => {
+                    println!("🔧 Using DOM Mode (Traditional)");
+                    AutomationExecutor::new()?
+                }
+            };
+        }
+
+        let (report, logs) = self.executor.execute_workflow(workflow).await?;
+        println!(
+            "📊 Workflow execution completed with {}% success rate",
+            (report.success_rate() * 100.0).round()
+        );
+        Ok((report, logs))
     }
 
     pub fn get_all_workflows(&self) -> Vec<&AutomationWorkflow> {
@@ -89,6 +135,32 @@ impl ACAutomationIntegration {
         tags: Vec<String>,
         execute_immediately: bool,
     ) -> Result<PipelineResult> {
+        self.full_ac_to_automation_pipeline_with_vision(
+            title,
+            feature,
+            criteria_text,
+            tags,
+            execute_immediately,
+            false,
+            None,
+            None,
+            None,
+        )
+        .await
+    }
+
+    pub async fn full_ac_to_automation_pipeline_with_vision(
+        &mut self,
+        title: String,
+        feature: String,
+        criteria_text: String,
+        tags: Vec<String>,
+        execute_immediately: bool,
+        use_vision: bool,
+        automation_mode: Option<String>,
+        vision_api_key: Option<String>,
+        vision_model: Option<String>,
+    ) -> Result<PipelineResult> {
         let criteria_id = format!("ac_{}", Uuid::new_v4().to_string()[..8].to_string());
 
         println!("🔄 Starting full AC to Automation pipeline for: {}", title);
@@ -108,11 +180,23 @@ impl ACAutomationIntegration {
         // Step 3: Generate browser script (optional)
         let mcp_script = self.generate_browser_script(&workflow, "mcp_browser");
 
-        // Step 4: Execute if requested
-        let execution_report = if execute_immediately {
-            Some(self.execute_automation_workflow(&workflow).await?)
+        // Step 4: Execute if requested (with vision config)
+        let (execution_report, execution_logs) = if execute_immediately {
+            let (report, logs) = if use_vision {
+                self.execute_automation_workflow_with_vision_config(
+                    &workflow,
+                    use_vision,
+                    automation_mode,
+                    vision_api_key,
+                    vision_model,
+                )
+                .await?
+            } else {
+                self.execute_automation_workflow(&workflow).await?
+            };
+            (Some(report), Some(logs))
         } else {
-            None
+            (None, None)
         };
 
         Ok(PipelineResult {
@@ -120,11 +204,16 @@ impl ACAutomationIntegration {
             workflow,
             mcp_script,
             execution_report,
+            execution_logs,
         })
     }
 
     pub fn set_verbose(&mut self, verbose: bool) {
         self.executor.set_verbose(verbose);
+    }
+
+    pub fn set_headless(&mut self, headless: bool) {
+        self.executor = self.executor.clone().with_headless(headless);
     }
 }
 
@@ -134,6 +223,7 @@ pub struct PipelineResult {
     pub workflow: AutomationWorkflow,
     pub mcp_script: String,
     pub execution_report: Option<ExecutionReport>,
+    pub execution_logs: Option<Vec<AutomationLog>>,
 }
 
 impl PipelineResult {
@@ -160,6 +250,16 @@ impl PipelineResult {
 
             if let Some(duration) = report.get_duration() {
                 println!("⏱️  Duration: {:.2}s", duration.as_secs_f64());
+            }
+        }
+
+        if let Some(logs) = &self.execution_logs {
+            println!("\n📝 === Execution Logs ({} entries) ===", logs.len());
+            for log in logs.iter().take(10) {
+                println!("[{}] {}: {}", log.timestamp, log.level, log.message);
+            }
+            if logs.len() > 10 {
+                println!("... and {} more log entries", logs.len() - 10);
             }
         }
 

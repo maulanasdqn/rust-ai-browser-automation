@@ -1,10 +1,11 @@
 use anyhow::Result;
 use automation_api::AcceptanceCriteria;
-use automation_browser::ExecutionReport;
+use automation_api::{AutomationWorkflow, BrowserAction, TestStep};
+use automation_browser::{AutomationExecutor, ExecutionReport};
 use openrouter_rs::{
-    OpenRouterClient,
     api::chat::{ChatCompletionRequest, Message},
     types::{Choice, Role},
+    OpenRouterClient,
 };
 use serde::{Deserialize, Serialize};
 
@@ -12,10 +13,11 @@ pub struct AIAutomationEngine {
     openrouter_client: OpenRouterClient,
     model: String,
     conversation_history: Vec<Message>,
+    headless: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BrowserAction {
+pub struct AIBrowserAction {
     pub action: String,
     pub selector: Option<String>,
     pub url: Option<String>,
@@ -29,7 +31,7 @@ pub struct BrowserAction {
 pub struct AIExecutionPlan {
     pub title: String,
     pub description: String,
-    pub steps: Vec<BrowserAction>,
+    pub steps: Vec<AIBrowserAction>,
     pub assertions: Vec<String>,
     pub estimated_duration: f64,
 }
@@ -56,7 +58,13 @@ impl AIAutomationEngine {
             openrouter_client: client,
             model,
             conversation_history: Vec::new(),
+            headless: true,
         })
+    }
+
+    pub fn with_headless(mut self, headless: bool) -> Self {
+        self.headless = headless;
+        self
     }
 
     pub async fn analyze_and_execute_ac(
@@ -66,28 +74,20 @@ impl AIAutomationEngine {
     ) -> Result<AIExecutionResult> {
         println!("🤖 AI analyzing acceptance criteria: {}", criteria.title);
 
-        // Create system prompt for browser automation
         let system_prompt = self.create_system_prompt();
-
-        // Create user prompt with acceptance criteria
         let user_prompt = self.create_user_prompt(criteria);
 
-        // Initialize conversation
         self.conversation_history.clear();
         self.conversation_history
             .push(Message::new(Role::System, &system_prompt));
         self.conversation_history
             .push(Message::new(Role::User, &user_prompt));
 
-        // Get AI analysis and plan
         let plan = self.get_ai_execution_plan().await?;
-
-        // Generate MCP Browser script
         let mcp_script = self.generate_mcp_browser_script(&plan);
 
-        // Execute if requested
         let execution_report = if execute_immediately {
-            Some(self.execute_via_mcp(&plan).await?)
+            Some(self.execute_real_browser_automation(&plan).await?)
         } else {
             None
         };
@@ -100,6 +100,97 @@ impl AIAutomationEngine {
             mcp_script,
             llm_reasoning: reasoning,
         })
+    }
+
+    async fn execute_real_browser_automation(
+        &self,
+        plan: &AIExecutionPlan,
+    ) -> Result<ExecutionReport> {
+        println!("🚀 Executing AI plan with real browser automation...");
+
+        let workflow = self.convert_ai_plan_to_workflow(plan);
+
+        let mut executor = AutomationExecutor::new()?.with_headless(self.headless);
+        executor.set_verbose(true);
+
+        let (report, _logs) = executor.execute_workflow(&workflow).await?;
+
+        println!(
+            "📊 AI Browser Automation completed: {:.1}% success rate",
+            report.success_rate() * 100.0
+        );
+
+        Ok(report)
+    }
+
+    fn convert_ai_plan_to_workflow(&self, plan: &AIExecutionPlan) -> AutomationWorkflow {
+        let mut test_steps = Vec::new();
+        let mut current_actions = Vec::new();
+        let mut step_counter = 1;
+
+        for ai_action in &plan.steps {
+            let browser_action = BrowserAction {
+                action_type: ai_action.action.clone(),
+                selector: ai_action.selector.clone(),
+                url: ai_action.url.clone(),
+                text: ai_action.text.clone(),
+                wait_condition: ai_action.wait_for.clone(),
+                screenshot: ai_action.screenshot.unwrap_or(false),
+            };
+
+            current_actions.push(browser_action);
+
+            if ai_action.action == "wait"
+                || ai_action.action == "screenshot"
+                || step_counter % 3 == 0
+            {
+                test_steps.push(TestStep {
+                    step_type: if step_counter <= 3 {
+                        "given"
+                    } else if step_counter <= 6 {
+                        "when"
+                    } else {
+                        "then"
+                    }
+                    .to_string(),
+                    description: format!("AI Step {}: Execute browser actions", step_counter),
+                    browser_actions: current_actions.clone(),
+                    assertions: if step_counter > 6 {
+                        plan.assertions.clone()
+                    } else {
+                        vec![]
+                    },
+                });
+                current_actions.clear();
+            }
+
+            step_counter += 1;
+        }
+
+        if !current_actions.is_empty() {
+            test_steps.push(TestStep {
+                step_type: "then".to_string(),
+                description: "Final AI actions and verification".to_string(),
+                browser_actions: current_actions,
+                assertions: plan.assertions.clone(),
+            });
+        }
+
+        AutomationWorkflow {
+            id: format!(
+                "ai_workflow_{}",
+                uuid::Uuid::new_v4().to_string()[..8].to_string()
+            ),
+            name: plan.title.clone(),
+            description: plan.description.clone(),
+            test_steps,
+            source_criteria: "ai_generated".to_string(),
+            tags: vec![
+                "ai".to_string(),
+                "browser".to_string(),
+                "automation".to_string(),
+            ],
+        }
     }
 
     fn create_system_prompt(&self) -> String {
@@ -285,7 +376,6 @@ Create a detailed browser automation plan that can be executed via MCP Browser t
             script.push_str("\n");
         }
 
-        // Add assertions
         for assertion in &plan.assertions {
             script.push_str(&format!("    // Verify: {}\n", assertion));
             script.push_str(&format!("    await browser.assert('{}');\n", assertion));
@@ -306,77 +396,6 @@ Create a detailed browser automation plan that can be executed via MCP Browser t
         script.push_str("executeAutomation().catch(console.error);\n");
 
         script
-    }
-
-    async fn execute_via_mcp(&self, plan: &AIExecutionPlan) -> Result<ExecutionReport> {
-        println!("🚀 Executing AI plan via MCP Browser simulation...");
-
-        // For now, simulate execution since we don't have actual MCP Browser setup
-        // In a real implementation, this would use the MCP Browser protocol
-        let mut report = ExecutionReport::new("ai_execution", &plan.title);
-        report.start_execution();
-
-        let mut successful_steps = 0;
-        let mut failed_steps = 0;
-
-        for (i, step) in plan.steps.iter().enumerate() {
-            println!(
-                "  🔧 Step {}: {} {}",
-                i + 1,
-                step.action,
-                step.selector.as_ref().unwrap_or(&"".to_string())
-            );
-
-            // Simulate execution time
-            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-
-            // Simulate success/failure (90% success rate for AI-generated plans)
-            let success = self.simulate_success(0.9);
-
-            if success {
-                successful_steps += 1;
-                println!("    ✅ Success");
-            } else {
-                failed_steps += 1;
-                println!("    ❌ Failed");
-            }
-        }
-
-        // Simulate assertion checking
-        for assertion in &plan.assertions {
-            println!("  ✓ Checking: {}", assertion);
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-            let success = self.simulate_success(0.85);
-            if success {
-                successful_steps += 1;
-            } else {
-                failed_steps += 1;
-            }
-        }
-
-        report.successful_steps = successful_steps;
-        report.failed_steps = failed_steps;
-        report.total_steps = successful_steps + failed_steps;
-        report.end_execution();
-
-        println!(
-            "📊 AI Execution completed: {:.1}% success rate",
-            report.success_rate() * 100.0
-        );
-
-        Ok(report)
-    }
-
-    fn simulate_success(&self, probability: f64) -> bool {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-        use std::time::SystemTime;
-
-        let mut hasher = DefaultHasher::new();
-        SystemTime::now().hash(&mut hasher);
-        let hash = hasher.finish();
-        (hash as f64 / u64::MAX as f64) < probability
     }
 
     fn extract_llm_reasoning(&self) -> String {

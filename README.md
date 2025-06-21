@@ -1,344 +1,483 @@
-# 🎯 AC to Automation Converter
+# 🤖 AI-Powered Browser Automation with Vision
 
-AI-powered system that converts **Acceptance Criteria (AC)** from QA specifications into automated browser testing workflows using the Model Context Protocol (MCP) and Browser MCP integration.
+Convert natural language into **real browser automation** using AI Vision and execute tests immediately with **live process logs**!
 
-## 🚀 Overview
+Inspired by [Skyvern](https://github.com/Skyvern-AI/skyvern), this system combines traditional DOM automation with **AI Vision** that "sees" web pages like a human.
 
-This system automatically transforms your Gherkin-style or plain text acceptance criteria into executable browser automation workflows. It leverages:
+## ✨ Key Features
 
-- **🦀 Rust MCP SDK** - For robust MCP server/client implementation
-- **🌐 Browser MCP** - For actual browser automation execution
-- **📋 Gherkin Parsing** - Native support for BDD-style acceptance criteria
-- **🤖 Intelligent Conversion** - Smart mapping from natural language to automation actions
+### 👁️ **AI Vision Mode** (Like Skyvern)
 
-## 🏗️ Architecture
+- **Visual Understanding**: AI analyzes screenshots to find elements visually
+- **Robust Automation**: Works even when websites change their HTML structure
+- **Natural Descriptions**: Use "click the blue login button" instead of CSS selectors
+- **Human-like Interaction**: Sees pages exactly like humans do
 
-```
-┌─────────────────┐    ┌──────────────────────┐    ┌─────────────────────┐
-│   Acceptance    │    │    AC Automation     │    │   Browser MCP       │
-│   Criteria      │───▶│    Server (MCP)      │───▶│   Server            │
-│   (Gherkin)     │    │                      │    │                     │
-└─────────────────┘    └──────────────────────┘    └─────────────────────┘
-                                  │
-                                  ▼
-                       ┌──────────────────────┐
-                       │  Integration Layer   │
-                       │  (Orchestrator)      │
-                       └──────────────────────┘
-                                  │
-                                  ▼
-                       ┌──────────────────────┐
-                       │  Execution Reports   │
-                       │  & Generated Scripts │
-                       └──────────────────────┘
-```
+### 🔧 **Three Automation Modes**
 
-### Components
+- **DOM Mode**: Traditional CSS selector-based (fast)
+- **Vision Mode**: AI visual understanding (robust)
+- **Hybrid Mode**: Smart fallback - tries DOM first, uses Vision if needed
 
-1. **`automation-api`** - MCP server for parsing AC and generating workflows
-2. **`automation-browser`** - Browser MCP client for workflow execution
-3. **`automation-integration`** - Orchestration layer connecting everything
+### 📝 **Real-Time Process Logs**
 
-## 📋 Prerequisites
+- **Live Execution Logs**: Watch automation steps in real-time
+- **Floating Log Panel**: See progress without scrolling
+- **Color-coded Messages**: Easy to spot successes, warnings, and errors
+- **Detailed Timestamps**: Track execution timing precisely
 
-- **Rust** (latest stable)
-- **Node.js** (for Browser MCP server)
-- **Browser MCP package**: `@browsermcp/mcp@latest`
+### 🚀 **Immediate Execution**
 
-## 🛠️ Setup
+- **Real Browser Testing**: Uses ChromeDriver for actual browser interaction
+- **AI-Powered Generation**: OpenRouter AI converts natural language to automation
+- **Multiple Script Formats**: Generate MCP Browser, Selenium, and Playwright scripts
+- **Visual Feedback**: Screenshots and detailed execution reports
 
-### 1. Install Dependencies
+## 🎯 What You Can Automate
+
+### 🔄 **User Workflows**
+
+- Login/registration flows
+- E-commerce checkout processes
+- Form submissions and validations
+- Multi-step wizards
+
+### 🎨 **Visual Interactions**
+
+- Click buttons by description ("red submit button")
+- Find inputs by visual context ("email field in top-right")
+- Navigate by visual landmarks ("menu button with hamburger icon")
+- Verify visual states ("success message appears")
+
+### 📊 **Content Testing**
+
+- Text presence verification
+- Element visibility checks
+- Page state validation
+- Dynamic content testing
+
+## 🛠️ Setup & Installation
+
+### 📋 Prerequisites
+
+1. **Install Rust**:
 
 ```bash
-# Install Node.js dependencies for Browser MCP
-npm install -g @browsermcp/mcp@latest
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
 
-# Clone and build the project
-git clone <repository-url>
+2. **Install ChromeDriver**:
+
+```bash
+# macOS with Homebrew
+brew install chromedriver
+
+# Ubuntu/Debian
+sudo apt-get install chromium-chromedriver
+
+# Windows: Download from https://chromedriver.chromium.org/
+```
+
+3. **Get OpenRouter API Key** (Recommended):
+   - Sign up at [openrouter.ai](https://openrouter.ai)
+   - Get your API key (starts with `sk-or-v1-...`)
+   - **🎉 One key works for both AI generation AND vision models!**
+
+### 🚀 Quick Start
+
+1. **Clone and Build**:
+
+```bash
+git clone <your-repo>
 cd ai-ac-automation
 cargo build --release
 ```
 
-### 2. Configure Browser MCP (Optional)
+2. **Configure Environment Variables** (Recommended):
 
-Add Browser MCP to your AI application (like Cursor):
+```bash
+# Create .env file with your OpenRouter API key
+echo "OPENROUTER_API_KEY=sk-or-v1-your-actual-key-here" > .env
+```
 
-```json
-{
-  "mcpServers": {
-    "browsermcp": {
-      "command": "npx",
-      "args": ["@browsermcp/mcp@latest"]
-    }
-  }
+3. **Start ChromeDriver** (in separate terminal):
+
+```bash
+chromedriver --port=9515
+```
+
+4. **Start the Web Interface**:
+
+```bash
+cargo run --bin automation-ui
+```
+
+5. **Open Browser**: Go to `http://localhost:3001`
+
+### 🔐 **API Key Configuration**
+
+You have **two options** for configuring your OpenRouter API key:
+
+#### **Option 1: Environment Variables (Recommended)**
+
+```bash
+# Create .env file in project root
+echo "OPENROUTER_API_KEY=sk-or-v1-your-key-here" > .env
+
+# Start the server - API key loaded automatically!
+cargo run --bin automation-ui
+```
+
+**✅ Benefits:**
+
+- **Secure**: API key never appears in UI or logs
+- **Convenient**: No need to enter key every time
+- **Universal**: Works for both AI generation and vision
+- **Safe**: `.env` is in `.gitignore` - won't be committed
+
+#### **Option 2: Web Form**
+
+- Leave `.env` empty or don't create it
+- Enter API key directly in the web interface forms
+- Works for individual sessions
+
+**💡 Pro Tip:** Use Option 1 for development, Option 2 for sharing/demos!
+
+### 📄 **Environment File (.env) Format**
+
+Your `.env` file should contain:
+
+```bash
+# Required: OpenRouter API key for all AI features
+OPENROUTER_API_KEY=sk-or-v1-your-actual-key-here
+
+# Optional: Default models (can be changed in UI)
+AI_MODEL=anthropic/claude-3.5-sonnet
+VISION_MODEL=openai/gpt-4o
+
+# Optional: Browser settings
+HEADLESS=false
+BROWSER_WIDTH=1920
+BROWSER_HEIGHT=1080
+
+# Optional: Server port
+PORT=3001
+```
+
+**🔒 Security Notes:**
+
+- Never commit `.env` to version control
+- Keep your API keys secure and rotate them regularly
+- Use different keys for development and production
+
+## 🎯 How to Use
+
+### 🔧 **Basic DOM Automation**
+
+1. **Enter URL**: `https://google.com`
+2. **Test Scenario**:
+
+```
+- Click on search box
+- Type "browser automation"
+- Press Enter
+- Verify results appear
+- Click on first result
+```
+
+3. **Execute**: Check "Execute immediately" → Click "Generate & Execute"
+
+### 👁️ **AI Vision Mode** (Recommended)
+
+1. **Enable Vision**: ✅ Check "Use AI Vision Mode (Like Skyvern)"
+2. **Configure**:
+
+   - **Mode**: Hybrid (tries DOM first, falls back to Vision)
+   - **API Key**: Auto-loaded from `.env` or enter manually
+   - **Model**: GPT-4 Omni (recommended)
+
+3. **Natural Test Scenario**:
+
+```
+Website: https://example.com/login
+Test:
+- Find the email input field
+- Type admin@test.com
+- Find the password field
+- Type mypassword123
+- Click the blue login button
+- Verify the dashboard appears
+```
+
+### 🤖 **AI-Powered Test Generation**
+
+1. **Enable AI**: ✅ Check "Use AI-Powered Automation"
+2. **API Key**: Auto-loaded from `.env` or enter your [OpenRouter key](https://openrouter.ai)
+3. **Describe Naturally**:
+
+```
+Test the login functionality:
+- User should be able to log in with valid credentials
+- After login, dashboard should be visible
+- User profile should show correct information
+- Logout should work properly
+```
+
+**🎯 Example with Environment Variables:**
+
+If you have `OPENROUTER_API_KEY` in your `.env` file:
+
+- ✅ **No API key entry needed** - works automatically!
+- ✅ **Same key** works for both AI generation and vision
+- ✅ **Secure** - never appears in forms or logs
+- ✅ **Fast** - instant access to all AI features
+
+## 🧠 Supported AI Models
+
+**🎉 All models available through [OpenRouter](https://openrouter.ai) with a single API key!**
+
+### 👁️ **Vision Models** (Real AI Vision Integration)
+
+| OpenRouter Model ID           | Provider      | Vision Quality | Speed      | Best For                   |
+| ----------------------------- | ------------- | -------------- | ---------- | -------------------------- |
+| `openai/gpt-4o`               | **OpenAI**    | ⭐⭐⭐⭐⭐     | ⭐⭐⭐⭐   | **Overall best choice** 🌟 |
+| `openai/gpt-4-vision-preview` | **OpenAI**    | ⭐⭐⭐⭐       | ⭐⭐⭐     | Detailed analysis          |
+| `anthropic/claude-3.5-sonnet` | **Anthropic** | ⭐⭐⭐⭐⭐     | ⭐⭐⭐⭐   | Complex reasoning          |
+| `google/gemini-2.0-flash-001` | **Google**    | ⭐⭐⭐⭐       | ⭐⭐⭐⭐⭐ | **Fastest option** 🚀      |
+| `google/gemini-pro-vision`    | **Google**    | ⭐⭐⭐         | ⭐⭐⭐⭐   | Cost-effective             |
+
+### 🧠 **Text Generation Models** (AI Test Creation)
+
+| OpenRouter Model ID           | Provider      | Quality    | Speed      | Best For                 |
+| ----------------------------- | ------------- | ---------- | ---------- | ------------------------ |
+| `anthropic/claude-3.5-sonnet` | **Anthropic** | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐   | **Best reasoning** 🧠    |
+| `openai/gpt-4o`               | **OpenAI**    | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐   | Complex automation       |
+| `openai/gpt-3.5-turbo`        | **OpenAI**    | ⭐⭐⭐⭐   | ⭐⭐⭐⭐⭐ | **Fast & affordable** 💰 |
+| `google/gemini-pro`           | **Google**    | ⭐⭐⭐⭐   | ⭐⭐⭐⭐   | Good alternative         |
+
+**🔑 Single API Key Benefits:**
+
+- **One account** for all AI providers
+- **Unified billing** and usage tracking
+- **Rate limiting** across all models
+- **Easy model switching** in the UI
+- **No separate API keys** to manage
+
+## 📊 Real-Time Execution Logs
+
+### 🎨 **Live Log Display**
+
+```
+[12:09:15.234] INFO: 🚀 Initializing Chrome WebDriver...
+[12:09:15.456] SUCCESS: ✅ Chrome WebDriver initialized successfully
+[12:09:15.567] INFO: 🔧 Running in HYBRID mode (DOM + Vision)
+[12:09:15.678] INFO: 🌐 Navigating to: https://example.com
+[12:09:17.123] SUCCESS: ✅ Navigated to https://example.com
+[12:09:17.234] INFO: 👁️ AI Vision: Looking for 'email input field' to click
+[12:09:17.456] INFO: 🧠 Analyzing screenshot with AI Vision
+[12:09:18.789] SUCCESS: ✅ AI Vision found coordinates: (450, 320)
+[12:09:18.890] INFO: 🖱️ Clicking at coordinates (450, 320)
+[12:09:19.123] SUCCESS: ✅ Vision-clicked at coordinates (450, 320)
+[12:09:19.234] INFO: ⌨️ Vision-typing 'admin@test.com' at coordinates (450, 320)
+[12:09:19.567] SUCCESS: ✅ Vision-typed 'admin@test.com' at coordinates (450, 320)
+```
+
+### 🎨 **Color-Coded Messages**
+
+- 🟢 **SUCCESS**: Operations completed successfully
+- 🔵 **INFO**: General information and progress
+- 🟡 **WARN**: Warnings and fallback actions
+- 🔴 **ERROR**: Failures and issues
+
+## 🔧 Advanced Configuration
+
+### 🖥️ **Programmatic Usage**
+
+```rust
+use automation_browser::{AutomationExecutor, AutomationMode};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Create executor with Vision Mode
+    let mut executor = AutomationExecutor::new()?
+        .with_vision_mode("sk-your-openai-key".to_string(), Some("gpt-4o".to_string()))
+        .with_headless(false);
+
+    // Execute workflow
+    let (report, logs) = executor.execute_workflow(&workflow).await?;
+
+    println!("Success rate: {:.1}%", report.success_rate() * 100.0);
+    println!("Logs captured: {}", logs.len());
+
+    Ok(())
 }
 ```
 
-## 🎮 Usage
+### ⚙️ **Automation Modes Comparison**
 
-### Quick Start Demo
+| Feature              | DOM Mode   | Vision Mode | Hybrid Mode |
+| -------------------- | ---------- | ----------- | ----------- |
+| **Speed**            | ⭐⭐⭐⭐⭐ | ⭐⭐⭐      | ⭐⭐⭐⭐    |
+| **Reliability**      | ⭐⭐⭐     | ⭐⭐⭐⭐⭐  | ⭐⭐⭐⭐⭐  |
+| **Setup Complexity** | ⭐⭐       | ⭐⭐⭐⭐    | ⭐⭐⭐      |
+| **Website Changes**  | ⭐         | ⭐⭐⭐⭐⭐  | ⭐⭐⭐⭐⭐  |
+| **Natural Language** | ⭐         | ⭐⭐⭐⭐⭐  | ⭐⭐⭐⭐    |
 
-```bash
-# Run the interactive demo
-cargo run --bin automation-integration
+## 🎨 Web Interface Features
 
-# Or run individual components
-cargo run --bin automation-api  # AC automation MCP server
-```
+### 📋 **Smart Forms**
 
-### Example: Converting Login Acceptance Criteria
+- **Live Examples**: Click examples to auto-fill forms
+- **Vision Configuration**: Easy setup for AI Vision mode
+- **Real-time Validation**: Immediate feedback on inputs
+- **Progress Tracking**: Live execution status
 
-**Input Acceptance Criteria:**
+### 📊 **Enhanced Results**
 
-```gherkin
-Scenario: Successful user login
-Given I am on the login page
-When I enter valid credentials
-And I click the login button
-Then I should be redirected to the dashboard
-And I should see a welcome message
-```
+- **Execution Statistics**: Success rates, timing, step counts
+- **Visual Logs**: Floating panels and detailed terminals
+- **Screenshot Gallery**: Automatic screenshots during execution
+- **Script Export**: Download generated automation scripts
 
-**Generated Automation Workflow:**
+### 🔧 **Debug Features**
 
-```json
-{
-  "id": "workflow_ac_12345",
-  "name": "Automation for: User Login",
-  "description": "Automated test workflow for Authentication - Successful user login",
-  "test_steps": [
-    {
-      "step_type": "given",
-      "description": "I am on the login page",
-      "browser_actions": [
-        {
-          "action_type": "navigate",
-          "url": "/login",
-          "wait_condition": "page_load"
-        }
-      ]
-    },
-    {
-      "step_type": "when",
-      "description": "I enter valid credentials",
-      "browser_actions": [
-        {
-          "action_type": "type",
-          "selector": "input[name*='username']",
-          "text": "valid credentials"
-        }
-      ]
-    }
-    // ... more steps
-  ]
-}
-```
+- **Step-by-step Breakdown**: See each action executed
+- **Error Highlighting**: Clear error messages and solutions
+- **Retry Logic**: Automatic retries with exponential backoff
+- **Fallback Options**: Hybrid mode switches strategies automatically
 
-**Generated MCP Browser Script:**
+## 🛡️ Security & Best Practices
 
-```javascript
-// MCP Browser Automation Script for: User Login
-// Generated from: Automated test workflow for Authentication
+### 🔐 **API Key Security**
 
-// GIVEN: I am on the login page
-await mcp.browser.navigate("/login");
+- Store API keys securely (never commit to version control)
+- Use environment variables for production
+- Rotate keys regularly
+- Monitor API usage and costs
 
-// WHEN: I enter valid credentials
-await mcp.browser.type('input[name*="username"]', "valid credentials");
+### 🧪 **Testing Environment**
 
-// WHEN: I click the login button
-await mcp.browser.click('button[contains(text(), "login button")]');
+- Use test accounts and sandbox environments
+- Avoid testing on production systems
+- Set up dedicated test data
+- Use headless mode for CI/CD
 
-// THEN: I should be redirected to the dashboard
-await mcp.browser.wait("page_stable");
-await mcp.browser.assert("url_contains: dashboard");
-```
+### 🌐 **Website Considerations**
 
-## 📝 Supported Acceptance Criteria Formats
+- Respect robots.txt and website terms
+- Add delays between actions to avoid rate limiting
+- Handle dynamic content and loading states
+- Consider website anti-automation measures
 
-### 1. Gherkin/BDD Format
+## 🆘 Troubleshooting
 
-```gherkin
-Scenario: Add item to cart
-Given I am on the product page for "Laptop"
-When I click "Add to Cart"
-And I select quantity "2"
-Then I should see cart icon showing "2 items"
-```
-
-### 2. Plain Text Format
-
-```text
-User should be able to submit contact form with valid data
-Navigate to contact page, fill form fields, submit, verify success message
-```
-
-### 3. Mixed Format
-
-```text
-Test Case: Form Validation
-Given I have invalid email format
-When I submit the form
-Then validation errors should appear
-```
-
-## 🔧 Available Browser Actions
-
-The system intelligently maps natural language to these browser actions:
-
-- **🧭 Navigation**: `navigate`, `go to`, `visit`
-- **👆 Interactions**: `click`, `press`, `select`, `choose`
-- **⌨️ Input**: `type`, `enter`, `fill`, `input`
-- **⏱️ Waiting**: `wait`, `pause`, automatic conditions
-- **📸 Verification**: `see`, `display`, `show`, `verify`
-
-## 🎯 Intelligent Parsing Features
-
-- **Smart Selector Generation** - Converts "login button" → `button[contains(text(), 'login')]`
-- **URL Recognition** - Extracts URLs or generates paths from context
-- **Action Context Awareness** - Different behavior for Given/When/Then steps
-- **Error Handling** - Graceful fallbacks for ambiguous instructions
-- **Assertion Generation** - Automatic test assertions from Then statements
-
-## 📊 Execution Reports
-
-```text
-📋 === AC to Automation Pipeline Summary ===
-📝 Acceptance Criteria: User Login
-🎯 Feature: Authentication
-📊 Scenario: Successful user login
-📦 Given Steps: 1
-⚡ When Steps: 2
-✅ Then Steps: 2
-🏷️  Tags: ["login", "authentication", "smoke"]
-
-🤖 Automation Workflow: Automation for: User Login
-📝 Description: Automated test workflow for Authentication - Successful user login
-🔢 Total Test Steps: 5
-
-📊 === Execution Report ===
-🎯 Workflow: Automation for: User Login
-📈 Success Rate: 80.0%
-✅ Successful Steps: 4
-❌ Failed Steps: 1
-⏱️  Duration: 12.45s
-```
-
-## 🔌 MCP Integration
-
-### AC Automation Server Tools
-
-- `parse_acceptance_criteria` - Parse Gherkin or plain text AC
-- `convert_to_automation` - Generate automation workflow
-- `get_workflows` - List all generated workflows
-- `execute_workflow` - Run workflow via Browser MCP
-- `generate_browser_script` - Export as various script formats
-
-### Browser MCP Client Actions
-
-- `navigate(url)` - Navigate to page
-- `click(selector)` - Click element
-- `type_text(selector, text)` - Input text
-- `wait_for_element(selector)` - Wait for element
-- `take_screenshot()` - Capture screenshot
-- `is_element_visible(selector)` - Check visibility
-
-## 🎨 Example Use Cases
-
-### 1. **QA Test Automation**
-
-Convert manual test cases to automated browser tests
-
-### 2. **BDD to Automation**
-
-Transform Gherkin specifications into executable tests
-
-### 3. **Regression Testing**
-
-Generate comprehensive test suites from acceptance criteria
-
-### 4. **Cross-browser Testing**
-
-Create consistent test workflows across different browsers
-
-### 5. **CI/CD Integration**
-
-Automated test generation and execution in pipelines
-
-## 🔍 Advanced Features
-
-### Custom Script Generation
-
-```rust
-// Generate different script formats
-let selenium_script = integration.generate_browser_script(&workflow_id, "selenium").await?;
-let playwright_script = integration.generate_browser_script(&workflow_id, "playwright").await?;
-let mcp_script = integration.generate_browser_script(&workflow_id, "mcp_browser").await?;
-```
-
-### Workflow Management
-
-```rust
-// Get all workflows
-let workflows = integration.get_all_workflows().await?;
-
-// Get specific workflow
-let workflow = integration.get_workflow("workflow_ac_12345").await?;
-
-// Execute specific workflow
-let report = integration.execute_automation_workflow(&workflow).await?;
-```
-
-## 🚨 Troubleshooting
-
-### Common Issues
-
-1. **Browser MCP Connection Failed**
-
-   ```bash
-   # Ensure Node.js and Browser MCP are installed
-   npm install -g @browsermcp/mcp@latest
-   npx @browsermcp/mcp@latest --version
-   ```
-
-2. **MCP Server Not Starting**
-
-   ```bash
-   # Check if automation-api builds successfully
-   cargo build --bin automation-api
-   cargo run --bin automation-api
-   ```
-
-3. **Workflow Execution Fails**
-   - Verify selectors are valid for target website
-   - Check if target website is accessible
-   - Ensure proper wait conditions
-
-### Debug Mode
+### 🔧 **ChromeDriver Issues**
 
 ```bash
-# Run with debug logging
-RUST_LOG=debug cargo run --bin automation-integration
+# Check ChromeDriver status
+curl http://localhost:9515/status
+
+# Restart ChromeDriver
+pkill chromedriver
+chromedriver --port=9515
 ```
+
+### 🔐 **Environment Variable Issues**
+
+```bash
+# Check if .env file exists and has correct format
+cat .env
+
+# Verify environment variable is loaded
+echo $OPENROUTER_API_KEY
+
+# Check server status for API key
+curl http://localhost:3001/api/env-status
+```
+
+### 👁️ **Vision Mode Issues**
+
+- **API Key**: Verify OpenRouter key is valid (`sk-or-v1-...`)
+- **Environment**: Check `.env` file or form input
+- **Model Access**: Ensure you have access to vision models on OpenRouter
+- **Rate Limits**: Check API usage quotas on [OpenRouter dashboard](https://openrouter.ai)
+- **Fallback**: Use Hybrid mode for automatic DOM fallback
+
+### 🚫 **Common Automation Issues**
+
+- **Element Not Found**: Try Vision mode for robust element detection
+- **Timing Issues**: Add waits for dynamic content
+- **Website Changes**: Vision mode adapts automatically
+- **Anti-bot Detection**: Use realistic delays and human-like patterns
+
+## 🏗️ Architecture
+
+### 🧱 **System Components**
+
+```
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│   Web UI        │    │   OpenRouter     │    │  ChromeDriver   │
+│  (Axum/HTML)    │◄──►│ (Unified AI API) │    │   (Browser)     │
+└─────────────────┘    └──────────────────┘    └─────────────────┘
+         │                       │                       │
+         ▼                       ▼                       ▼
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│ Automation API  │    │  Vision Engine   │    │ Browser Actions │
+│   (Workflow)    │◄──►│  (Screenshots)   │◄──►│ (Click/Type)    │
+└─────────────────┘    └──────────────────┘    └─────────────────┘
+```
+
+**🔧 Integration Benefits:**
+
+- **Single API endpoint** for all AI models
+- **Environment variable** configuration (`.env`)
+- **Automatic failover** between providers
+- **Cost optimization** through unified billing
+
+### 📦 **Crate Structure**
+
+- **automation-ui**: Web interface and server
+- **automation-browser**: Chrome automation with Vision support
+- **automation-api**: Core workflow and data structures
+- **automation-integration**: Pipeline orchestration
+- **automation-ai**: AI model integration
 
 ## 🤝 Contributing
 
-1. Fork the repository
-2. Create feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit changes (`git commit -am 'Add amazing feature'`)
-4. Push branch (`git push origin feature/amazing-feature`)
-5. Open Pull Request
+We welcome contributions! Here's how to get started:
+
+1. **Fork** the repository
+2. **Create** a feature branch (`git checkout -b feature/amazing-feature`)
+3. **Add tests** for your changes
+4. **Update documentation** as needed
+5. **Submit** a pull request
+
+### 🎯 **Contribution Areas**
+
+- **Vision Model Support**: Add new AI vision providers
+- **Browser Support**: Firefox, Safari automation
+- **UI Enhancements**: Better visual design
+- **Performance**: Optimization and caching
+- **Testing**: More comprehensive test coverage
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT License - see [LICENSE](LICENSE) file for details.
 
 ## 🙏 Acknowledgments
 
-- **[Rust MCP SDK](https://github.com/modelcontextprotocol/rust-sdk)** - Official Rust implementation
-- **[Browser MCP](https://docs.browsermcp.io/)** - Browser automation via MCP
-- **Model Context Protocol** - Standardized AI-tool communication
+- **[Skyvern](https://github.com/Skyvern-AI/skyvern)**: Inspiration for AI Vision automation
+- **OpenAI**: GPT-4 Vision capabilities
+- **Anthropic**: Claude vision and reasoning
+- **Selenium**: Browser automation foundation
+- **Rust Community**: Amazing ecosystem and support
 
 ---
 
-**🎯 Transform your acceptance criteria into automated tests with the power of MCP!** 🚀
+<div align="center">
+
+**🚀 Built with ❤️ using Rust, AI Vision, and Real Browser Automation**
+
+[🌟 Star this repo](https://github.com/your-repo) • [🐛 Report Issues](https://github.com/your-repo/issues) • [💡 Request Features](https://github.com/your-repo/discussions)
+
+</div>

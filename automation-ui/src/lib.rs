@@ -1,4 +1,5 @@
 use automation_ai::AIAutomationEngine;
+use automation_browser::AutomationLog;
 use automation_integration::ACAutomationIntegration;
 use axum::http::Method;
 use axum::{
@@ -36,6 +37,14 @@ pub struct ProcessACRequest {
     pub openrouter_api_key: Option<String>,
     #[serde(default)]
     pub ai_model: Option<String>,
+    #[serde(default)]
+    pub use_vision: Option<bool>,
+    #[serde(default)]
+    pub automation_mode: Option<String>,
+    #[serde(default)]
+    pub vision_api_key: Option<String>,
+    #[serde(default)]
+    pub vision_model: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -46,6 +55,7 @@ pub struct ProcessACResponse {
     pub workflow: Option<automation_api::AutomationWorkflow>,
     pub mcp_script: Option<String>,
     pub execution_report: Option<automation_browser::ExecutionReport>,
+    pub execution_logs: Option<Vec<AutomationLog>>,
     pub ai_used: bool,
     pub ai_plan: Option<automation_ai::AIExecutionPlan>,
     pub ai_reasoning: Option<String>,
@@ -99,6 +109,10 @@ pub fn create_app(state: SharedState) -> Router {
         .route(
             "/api/script/:workflow_id",
             get(get_script).options(options_handler),
+        )
+        .route(
+            "/api/env-status",
+            get(get_env_status).options(options_handler),
         )
         .nest_service("/static", ServeDir::new("automation-ui/static"))
         .layer(cors)
@@ -193,7 +207,13 @@ async fn process_acceptance_criteria(
 
     if use_ai {
         // AI-powered processing
-        if let Some(api_key) = &request.openrouter_api_key {
+        let api_key = request
+            .openrouter_api_key
+            .clone()
+            .or_else(|| std::env::var("OPENROUTER_API_KEY").ok())
+            .filter(|key| !key.is_empty());
+
+        if let Some(api_key) = api_key {
             // Initialize AI engine if not already done or if API key changed
             if app_state.ai_engine.is_none() {
                 match AIAutomationEngine::new(api_key.clone(), request.ai_model.clone()) {
@@ -211,6 +231,7 @@ async fn process_acceptance_criteria(
                                 workflow: None,
                                 mcp_script: None,
                                 execution_report: None,
+                                execution_logs: None,
                                 ai_used: false,
                                 ai_plan: None,
                                 ai_reasoning: None,
@@ -241,6 +262,7 @@ async fn process_acceptance_criteria(
                                 workflow: None, // AI creates its own plan format
                                 mcp_script: Some(ai_result.mcp_script),
                                 execution_report: ai_result.execution_report,
+                                execution_logs: None, // AI doesn't use the new logging yet
                                 ai_used: true,
                                 ai_plan: Some(ai_result.plan),
                                 ai_reasoning: Some(ai_result.llm_reasoning),
@@ -257,6 +279,7 @@ async fn process_acceptance_criteria(
                                 workflow: None,
                                 mcp_script: None,
                                 execution_report: None,
+                                execution_logs: None,
                                 ai_used: true,
                                 ai_plan: None,
                                 ai_reasoning: None,
@@ -270,11 +293,12 @@ async fn process_acceptance_criteria(
                 StatusCode::BAD_REQUEST,
                 Json(ProcessACResponse {
                     success: false,
-                    message: "OpenRouter API key required for AI processing".to_string(),
+                    message: "OpenRouter API key required for AI processing. Please provide it in the form or set OPENROUTER_API_KEY environment variable.".to_string(),
                     workflow_id: None,
                     workflow: None,
                     mcp_script: None,
                     execution_report: None,
+                    execution_logs: None,
                     ai_used: false,
                     ai_plan: None,
                     ai_reasoning: None,
@@ -306,25 +330,88 @@ async fn process_acceptance_criteria(
             .join("\n")
     );
 
-    match app_state
-        .integration
-        .full_ac_to_automation_pipeline(
-            title,
-            "Web Automation".to_string(),
-            criteria_text,
-            tags,
-            request.execute_immediately.unwrap_or(false),
-        )
-        .await
-    {
+    // Check if vision mode is enabled
+    let use_vision = request.use_vision.unwrap_or(false);
+
+    let result = if use_vision {
+        // Vision-enabled processing
+        println!("👁️ Processing with Vision Mode enabled");
+
+        let vision_api_key = request
+            .vision_api_key
+            .clone()
+            .or_else(|| std::env::var("OPENROUTER_API_KEY").ok())
+            .filter(|key| !key.is_empty());
+
+        if vision_api_key.is_none() {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ProcessACResponse {
+                    success: false,
+                    message: "Vision mode requires API key. Please provide it in the form or set OPENROUTER_API_KEY environment variable.".to_string(),
+                    workflow_id: None,
+                    workflow: None,
+                    mcp_script: None,
+                    execution_report: None,
+                    execution_logs: None,
+                    ai_used: false,
+                    ai_plan: None,
+                    ai_reasoning: None,
+                }),
+            );
+        }
+
+        app_state
+            .integration
+            .full_ac_to_automation_pipeline_with_vision(
+                title,
+                "Web Automation".to_string(),
+                criteria_text,
+                tags,
+                request.execute_immediately.unwrap_or(false),
+                use_vision,
+                request.automation_mode.clone(),
+                vision_api_key,
+                request.vision_model.clone(),
+            )
+            .await
+    } else {
+        // Standard DOM-based processing
+        app_state
+            .integration
+            .full_ac_to_automation_pipeline(
+                title,
+                "Web Automation".to_string(),
+                criteria_text,
+                tags,
+                request.execute_immediately.unwrap_or(false),
+            )
+            .await
+    };
+
+    match result {
         Ok(result) => {
+            let mut response_message = "Successfully processed acceptance criteria".to_string();
+            if use_vision {
+                let mode = request.automation_mode.as_deref().unwrap_or("hybrid");
+                response_message = format!(
+                    "Successfully processed with {} mode",
+                    match mode {
+                        "vision" => "AI Vision",
+                        "hybrid" => "Hybrid (DOM + Vision)",
+                        _ => "DOM",
+                    }
+                );
+            }
+
             let response = ProcessACResponse {
                 success: true,
-                message: "Successfully processed acceptance criteria".to_string(),
+                message: response_message,
                 workflow_id: Some(result.workflow.id.clone()),
                 workflow: Some(result.workflow),
                 mcp_script: Some(result.mcp_script),
                 execution_report: result.execution_report,
+                execution_logs: result.execution_logs,
                 ai_used: false,
                 ai_plan: None,
                 ai_reasoning: None,
@@ -339,6 +426,7 @@ async fn process_acceptance_criteria(
                 workflow: None,
                 mcp_script: None,
                 execution_report: None,
+                execution_logs: None,
                 ai_used: false,
                 ai_plan: None,
                 ai_reasoning: None,
@@ -368,6 +456,19 @@ async fn process_acceptance_criteria_form(
             .cloned()
             .filter(|s| !s.is_empty()),
         ai_model: form_data.get("ai_model").cloned().filter(|s| !s.is_empty()),
+        use_vision: form_data.get("use_vision").map(|_| true),
+        automation_mode: form_data
+            .get("automation_mode")
+            .cloned()
+            .filter(|s| !s.is_empty()),
+        vision_api_key: form_data
+            .get("vision_api_key")
+            .cloned()
+            .filter(|s| !s.is_empty()),
+        vision_model: form_data
+            .get("vision_model")
+            .cloned()
+            .filter(|s| !s.is_empty()),
     };
 
     // Forward to the JSON handler
@@ -492,7 +593,7 @@ async fn execute_workflow(
             .execute_automation_workflow(&workflow_clone)
             .await
         {
-            Ok(report) => Json(report).into_response(),
+            Ok((report, _logs)) => Json(report).into_response(),
             Err(e) => {
                 let error_report = automation_browser::ExecutionReport::new(
                     "error",
@@ -502,7 +603,10 @@ async fn execute_workflow(
             }
         }
     } else {
-        let error_report = automation_browser::ExecutionReport::new("error", "Workflow not found");
+        let error_report = automation_browser::ExecutionReport::new(
+            "not_found",
+            &format!("Workflow not found: {}", workflow_id),
+        );
         (StatusCode::NOT_FOUND, Json(error_report)).into_response()
     }
 }
@@ -517,28 +621,45 @@ async fn get_script(
     if let Some(workflow) = app_state.integration.get_workflow(&workflow_id) {
         let format = params
             .get("format")
-            .unwrap_or(&"mcp_browser".to_string())
-            .clone();
+            .map(|s| s.as_str())
+            .unwrap_or("mcp_browser");
         let script = app_state
             .integration
-            .generate_browser_script(workflow, &format);
-
-        let content_type = match format.as_str() {
-            "selenium" => "text/x-python",
-            "playwright" => "application/javascript",
-            _ => "application/javascript",
-        };
+            .generate_browser_script(workflow, format);
 
         (
             StatusCode::OK,
-            [(axum::http::header::CONTENT_TYPE, content_type)],
+            [(axum::http::header::CONTENT_TYPE, "text/plain")],
             script,
         )
     } else {
         (
             StatusCode::NOT_FOUND,
             [(axum::http::header::CONTENT_TYPE, "text/plain")],
-            "Workflow not found".to_string(),
+            format!("Workflow not found: {}", workflow_id),
         )
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnvStatusResponse {
+    pub openrouter_key_configured: bool,
+    pub openrouter_key_source: String,
+}
+
+async fn get_env_status() -> impl IntoResponse {
+    let openrouter_key = std::env::var("OPENROUTER_API_KEY")
+        .ok()
+        .filter(|key| !key.is_empty());
+
+    let response = EnvStatusResponse {
+        openrouter_key_configured: openrouter_key.is_some(),
+        openrouter_key_source: if openrouter_key.is_some() {
+            "environment".to_string()
+        } else {
+            "none".to_string()
+        },
+    };
+
+    (StatusCode::OK, Json(response))
 }

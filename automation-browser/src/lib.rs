@@ -1,31 +1,106 @@
 pub mod chrome;
 
 use anyhow::Result;
-use automation_api::{AutomationWorkflow, BrowserAction, TestStep};
+use automation_api::{AutomationWorkflow, TestStep};
 use std::time::{Duration, SystemTime};
 
-pub use chrome::*;
+pub use chrome::{AutomationLog, AutomationMode, ChromeAutomationEngine, VisionAction};
 
 #[derive(Debug, Clone)]
 pub struct AutomationExecutor {
     verbose: bool,
+    headless: bool,
+    mode: AutomationMode,
+    vision_api_key: Option<String>,
+    vision_model: Option<String>,
 }
 
 impl AutomationExecutor {
     pub fn new() -> Result<Self> {
-        Ok(Self { verbose: true })
+        Ok(Self {
+            verbose: true,
+            headless: false,
+            mode: AutomationMode::Dom,
+            vision_api_key: None,
+            vision_model: None,
+        })
+    }
+
+    pub fn with_headless(mut self, headless: bool) -> Self {
+        self.headless = headless;
+        self
+    }
+
+    pub fn with_vision_mode(mut self, api_key: String, model: Option<String>) -> Self {
+        self.mode = AutomationMode::Vision;
+        self.vision_api_key = Some(api_key);
+        self.vision_model = model;
+        self
+    }
+
+    pub fn with_hybrid_mode(mut self, api_key: String, model: Option<String>) -> Self {
+        self.mode = AutomationMode::Hybrid;
+        self.vision_api_key = Some(api_key);
+        self.vision_model = model;
+        self
     }
 
     pub async fn execute_workflow(
         &mut self,
         workflow: &AutomationWorkflow,
-    ) -> Result<ExecutionReport> {
+    ) -> Result<(ExecutionReport, Vec<AutomationLog>)> {
         let mut report = ExecutionReport::new(&workflow.id, &workflow.name);
 
         if self.verbose {
             println!("🚀 Starting execution of workflow: {}", workflow.name);
         }
         report.start_execution();
+
+        let mut chrome_engine = match self.mode {
+            AutomationMode::Dom => ChromeAutomationEngine::new(self.headless),
+            AutomationMode::Vision => {
+                if let Some(api_key) = &self.vision_api_key {
+                    ChromeAutomationEngine::new(self.headless)
+                        .with_vision_mode(api_key.clone(), self.vision_model.clone())
+                } else {
+                    return Err(anyhow::anyhow!("Vision mode requires API key"));
+                }
+            }
+            AutomationMode::Hybrid => {
+                if let Some(api_key) = &self.vision_api_key {
+                    ChromeAutomationEngine::new(self.headless)
+                        .with_hybrid_mode(api_key.clone(), self.vision_model.clone())
+                } else {
+                    return Err(anyhow::anyhow!("Hybrid mode requires API key"));
+                }
+            }
+        };
+
+        chrome_engine.set_verbose(self.verbose);
+
+        match chrome_engine.initialize().await {
+            Ok(_) => {
+                if self.verbose {
+                    println!("✅ Browser automation engine initialized");
+                }
+            }
+            Err(e) => {
+                let error_msg = format!("Failed to initialize browser: {}", e);
+                report.add_step_failure(
+                    &TestStep {
+                        step_type: "initialization".to_string(),
+                        description: "Initialize browser".to_string(),
+                        browser_actions: vec![],
+                        assertions: vec![],
+                    },
+                    error_msg.clone(),
+                );
+                report.end_execution();
+
+                let logs = chrome_engine.get_logs().await;
+                return Ok((report, logs));
+            }
+        }
 
         for (step_index, step) in workflow.test_steps.iter().enumerate() {
             if self.verbose {
@@ -37,7 +112,7 @@ impl AutomationExecutor {
                 );
             }
 
-            let step_result = self.execute_test_step(step).await;
+            let step_result = self.execute_test_step(&mut chrome_engine, step).await;
             match step_result {
                 Ok(actions_executed) => {
                     report.add_step_success(step, actions_executed);
@@ -51,25 +126,39 @@ impl AutomationExecutor {
                         println!("❌ Step {} failed: {}", step_index + 1, e);
                     }
 
-                    // Continue execution for now, but mark as failed
-                    // In production, you might want to stop on failure
+                    if step.step_type == "given" {
+                        break;
+                    }
                 }
+            }
+        }
+
+        if let Err(e) = chrome_engine.close().await {
+            if self.verbose {
+                println!("⚠️ Failed to close browser cleanly: {}", e);
             }
         }
 
         report.end_execution();
         if self.verbose {
             println!("🏁 Workflow execution completed");
+            report.print_summary();
         }
 
-        Ok(report)
+        let logs = chrome_engine.get_logs().await;
+
+        Ok((report, logs))
     }
 
-    async fn execute_test_step(&mut self, step: &TestStep) -> Result<Vec<String>> {
+    async fn execute_test_step(
+        &mut self,
+        chrome_engine: &mut ChromeAutomationEngine,
+        step: &TestStep,
+    ) -> Result<Vec<String>> {
         let mut executed_actions = Vec::new();
 
         for action in &step.browser_actions {
-            match self.execute_browser_action(action).await {
+            match chrome_engine.execute_browser_action(action).await {
                 Ok(action_result) => {
                     executed_actions.push(format!("{}: {}", action.action_type, action_result));
                 }
@@ -83,9 +172,8 @@ impl AutomationExecutor {
             }
         }
 
-        // Execute assertions
         for assertion in &step.assertions {
-            match self.execute_assertion(assertion).await {
+            match chrome_engine.execute_assertion(assertion).await {
                 Ok(_) => {
                     executed_actions.push(format!("assertion: {} - PASSED", assertion));
                 }
@@ -98,189 +186,9 @@ impl AutomationExecutor {
         Ok(executed_actions)
     }
 
-    async fn execute_browser_action(&mut self, action: &BrowserAction) -> Result<String> {
-        if self.verbose {
-            println!("  🔧 Executing action: {}", action.action_type);
-        }
-
-        match action.action_type.as_str() {
-            "navigate" => {
-                if let Some(url) = &action.url {
-                    // Simulate navigation
-                    self.simulate_wait("navigation", 1000).await?;
-                    Ok(format!("Navigated to {}", url))
-                } else {
-                    Err(anyhow::anyhow!("Navigate action requires URL"))
-                }
-            }
-            "click" => {
-                if let Some(selector) = &action.selector {
-                    // Simulate click
-                    self.simulate_wait("click", 500).await?;
-                    Ok(format!("Clicked element {}", selector))
-                } else {
-                    Err(anyhow::anyhow!("Click action requires selector"))
-                }
-            }
-            "type" => {
-                if let Some(selector) = &action.selector {
-                    if let Some(text) = &action.text {
-                        // Simulate typing
-                        self.simulate_wait("typing", 300 * text.len() as u64)
-                            .await?;
-                        Ok(format!("Typed '{}' into {}", text, selector))
-                    } else {
-                        Err(anyhow::anyhow!("Type action requires text"))
-                    }
-                } else {
-                    Err(anyhow::anyhow!("Type action requires selector"))
-                }
-            }
-            "select" => {
-                if let Some(selector) = &action.selector {
-                    if let Some(value) = &action.text {
-                        // Simulate selection
-                        self.simulate_wait("selection", 400).await?;
-                        Ok(format!("Selected '{}' in {}", value, selector))
-                    } else {
-                        Err(anyhow::anyhow!("Select action requires value"))
-                    }
-                } else {
-                    Err(anyhow::anyhow!("Select action requires selector"))
-                }
-            }
-            "wait" => {
-                if let Some(condition) = &action.wait_condition {
-                    match condition.as_str() {
-                        "page_load" => {
-                            self.simulate_wait("page load", 2000).await?;
-                            Ok("Waited for page load".to_string())
-                        }
-                        "page_stable" => {
-                            self.simulate_wait("page stability", 500).await?;
-                            Ok("Waited for page stability".to_string())
-                        }
-                        "element_visible" => {
-                            self.simulate_wait("element visibility", 1000).await?;
-                            Ok("Waited for element to be visible".to_string())
-                        }
-                        _ => {
-                            self.simulate_wait("custom condition", 1000).await?;
-                            Ok(format!("Waited for condition: {}", condition))
-                        }
-                    }
-                } else {
-                    self.simulate_wait("default wait", 1000).await?;
-                    Ok("Waited for default duration".to_string())
-                }
-            }
-            _ => Err(anyhow::anyhow!(
-                "Unknown action type: {}",
-                action.action_type
-            )),
-        }?;
-
-        if action.screenshot {
-            if self.verbose {
-                println!("  📸 Taking screenshot");
-            }
-            self.simulate_wait("screenshot", 200).await?;
-        }
-
-        Ok(format!("Executed {} action", action.action_type))
-    }
-
-    async fn execute_assertion(&mut self, assertion: &str) -> Result<()> {
-        if self.verbose {
-            println!("  ✓ Checking assertion: {}", assertion);
-        }
-
-        let parts: Vec<&str> = assertion.split(": ").collect();
-        if parts.len() != 2 {
-            return Err(anyhow::anyhow!("Invalid assertion format: {}", assertion));
-        }
-
-        let assertion_type = parts[0];
-        let assertion_value = parts[1];
-
-        // Simulate assertion checking
-        self.simulate_wait("assertion check", 300).await?;
-
-        match assertion_type {
-            "element_visible" => {
-                // Simulate checking if element is visible (90% success rate for demo)
-                if rand_success(0.9) {
-                    Ok(())
-                } else {
-                    Err(anyhow::anyhow!(
-                        "Element '{}' is not visible",
-                        assertion_value
-                    ))
-                }
-            }
-            "element_not_visible" => {
-                // Simulate checking if element is not visible (95% success rate for demo)
-                if rand_success(0.95) {
-                    Ok(())
-                } else {
-                    Err(anyhow::anyhow!(
-                        "Element '{}' should not be visible",
-                        assertion_value
-                    ))
-                }
-            }
-            "url_contains" => {
-                // Simulate URL check (85% success rate for demo)
-                if rand_success(0.85) {
-                    Ok(())
-                } else {
-                    Err(anyhow::anyhow!(
-                        "Current URL does not contain '{}'",
-                        assertion_value
-                    ))
-                }
-            }
-            "page_content_contains" => {
-                // Simulate content check (80% success rate for demo)
-                if rand_success(0.8) {
-                    Ok(())
-                } else {
-                    Err(anyhow::anyhow!(
-                        "Page content does not contain '{}'",
-                        assertion_value
-                    ))
-                }
-            }
-            _ => Err(anyhow::anyhow!(
-                "Unknown assertion type: {}",
-                assertion_type
-            )),
-        }
-    }
-
-    async fn simulate_wait(&self, action_name: &str, duration_ms: u64) -> Result<()> {
-        if self.verbose && duration_ms > 1000 {
-            println!("    ⏳ Waiting for {} ({}ms)", action_name, duration_ms);
-        }
-        tokio::time::sleep(Duration::from_millis(duration_ms)).await;
-        Ok(())
-    }
-
     pub fn set_verbose(&mut self, verbose: bool) {
         self.verbose = verbose;
     }
-}
-
-// Simple random success simulation for demo purposes
-fn rand_success(probability: f64) -> bool {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-
-    let mut hasher = DefaultHasher::new();
-    SystemTime::now().hash(&mut hasher);
-    let hash = hasher.finish();
-
-    (hash as f64 / u64::MAX as f64) < probability
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
