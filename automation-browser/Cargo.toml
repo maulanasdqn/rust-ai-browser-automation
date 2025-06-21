@@ -1,0 +1,13 @@
+[package]
+name = "automation-browser"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+thirtyfour.workspace = true
+tokio.workspace = true
+rmcp.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+automation-api = { path = "../automation-api" }

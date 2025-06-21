@@ -1,0 +1,1098 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>🎯 AC to Automation Converter</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          Oxygen, Ubuntu, Cantarell, sans-serif;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        min-height: 100vh;
+        color: #333;
+        line-height: 1.6;
+      }
+
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 20px;
+      }
+
+      .header {
+        text-align: center;
+        color: white;
+        margin-bottom: 40px;
+      }
+
+      .header h1 {
+        font-size: 2.5em;
+        margin-bottom: 10px;
+        text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+      }
+
+      .header p {
+        font-size: 1.2em;
+        opacity: 0.9;
+      }
+
+      .main-card {
+        background: white;
+        border-radius: 15px;
+        padding: 30px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        margin-bottom: 30px;
+      }
+
+      .tabs {
+        display: flex;
+        margin-bottom: 30px;
+        border-bottom: 2px solid #f0f0f0;
+      }
+
+      .tab {
+        padding: 15px 25px;
+        cursor: pointer;
+        border: none;
+        background: none;
+        font-size: 16px;
+        font-weight: 500;
+        color: #666;
+        border-bottom: 3px solid transparent;
+        transition: all 0.3s ease;
+      }
+
+      .tab.active {
+        color: #667eea;
+        border-bottom-color: #667eea;
+      }
+
+      .tab:hover {
+        color: #667eea;
+        background: rgba(102, 126, 234, 0.1);
+      }
+
+      .tab-content {
+        display: none;
+      }
+
+      .tab-content.active {
+        display: block;
+      }
+
+      .form-group {
+        margin-bottom: 20px;
+      }
+
+      .form-group label {
+        display: block;
+        margin-bottom: 8px;
+        font-weight: 600;
+        color: #555;
+      }
+
+      .form-group input,
+      .form-group textarea,
+      .form-group select {
+        width: 100%;
+        padding: 12px;
+        border: 2px solid #e1e5e9;
+        border-radius: 8px;
+        font-size: 14px;
+        transition: border-color 0.3s ease;
+      }
+
+      .form-group input:focus,
+      .form-group textarea:focus,
+      .form-group select:focus {
+        outline: none;
+        border-color: #667eea;
+        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+      }
+
+      textarea {
+        resize: vertical;
+        min-height: 150px;
+        font-family: "Courier New", monospace;
+      }
+
+      .checkbox-group {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .checkbox-group input[type="checkbox"] {
+        width: auto;
+      }
+
+      .btn {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        padding: 12px 25px;
+        border-radius: 8px;
+        font-size: 16px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+      }
+
+      .btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+        transform: none;
+      }
+
+      .btn-secondary {
+        background: #6c757d;
+      }
+
+      .btn-danger {
+        background: #dc3545;
+      }
+
+      .sample-buttons {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 20px;
+        flex-wrap: wrap;
+      }
+
+      .sample-btn {
+        background: #e9ecef;
+        color: #495057;
+        border: 1px solid #ced4da;
+        padding: 8px 15px;
+        border-radius: 6px;
+        font-size: 14px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+      }
+
+      .sample-btn:hover {
+        background: #667eea;
+        color: white;
+        border-color: #667eea;
+      }
+
+      .results {
+        margin-top: 30px;
+        padding: 20px;
+        background: #f8f9fa;
+        border-radius: 10px;
+        border-left: 5px solid #667eea;
+      }
+
+      .results.error {
+        background: #f8d7da;
+        border-left-color: #dc3545;
+      }
+
+      .results.success {
+        background: #d4edda;
+        border-left-color: #28a745;
+      }
+
+      .workflow-details {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 20px;
+        margin-top: 20px;
+      }
+
+      .workflow-section {
+        background: white;
+        padding: 20px;
+        border-radius: 10px;
+        border: 1px solid #e1e5e9;
+      }
+
+      .workflow-section h3 {
+        color: #667eea;
+        margin-bottom: 15px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .script-container {
+        background: #2d3748;
+        color: #e2e8f0;
+        padding: 15px;
+        border-radius: 8px;
+        font-family: "Courier New", monospace;
+        font-size: 13px;
+        overflow-x: auto;
+        margin-top: 10px;
+      }
+
+      .step-list {
+        list-style: none;
+      }
+
+      .step-item {
+        padding: 10px;
+        margin-bottom: 8px;
+        background: #f8f9fa;
+        border-radius: 6px;
+        border-left: 4px solid #667eea;
+      }
+
+      .step-type {
+        font-weight: bold;
+        color: #667eea;
+        text-transform: uppercase;
+        font-size: 12px;
+      }
+
+      .workflow-list {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+        gap: 20px;
+        margin-top: 20px;
+      }
+
+      .workflow-card {
+        background: white;
+        padding: 20px;
+        border-radius: 10px;
+        border: 1px solid #e1e5e9;
+        transition: all 0.3s ease;
+      }
+
+      .workflow-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+      }
+
+      .workflow-card h4 {
+        color: #667eea;
+        margin-bottom: 10px;
+      }
+
+      .workflow-tags {
+        display: flex;
+        gap: 5px;
+        flex-wrap: wrap;
+        margin-top: 10px;
+      }
+
+      .tag {
+        background: #e9ecef;
+        color: #495057;
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 12px;
+      }
+
+      .loading {
+        display: none;
+        text-align: center;
+        padding: 20px;
+      }
+
+      .spinner {
+        border: 4px solid #f3f3f3;
+        border-top: 4px solid #667eea;
+        border-radius: 50%;
+        width: 40px;
+        height: 40px;
+        animation: spin 1s linear infinite;
+        margin: 0 auto 10px;
+      }
+
+      @keyframes spin {
+        0% {
+          transform: rotate(0deg);
+        }
+        100% {
+          transform: rotate(360deg);
+        }
+      }
+
+      .execution-report {
+        margin-top: 20px;
+        padding: 15px;
+        background: #f8f9fa;
+        border-radius: 8px;
+      }
+
+      .success-rate {
+        font-size: 1.2em;
+        font-weight: bold;
+        margin-bottom: 10px;
+      }
+
+      .success-rate.high {
+        color: #28a745;
+      }
+      .success-rate.medium {
+        color: #ffc107;
+      }
+      .success-rate.low {
+        color: #dc3545;
+      }
+
+      @media (max-width: 768px) {
+        .container {
+          padding: 10px;
+        }
+
+        .header h1 {
+          font-size: 2em;
+        }
+
+        .main-card {
+          padding: 20px;
+        }
+
+        .tabs {
+          flex-direction: column;
+        }
+
+        .sample-buttons {
+          flex-direction: column;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <h1>🌐 Website Test Automation</h1>
+        <p>Enter any website + scenario → Get real MCP browser automation</p>
+      </div>
+
+      <div class="main-card">
+        <div class="tabs">
+          <button class="tab active" onclick="switchTab('convert')">
+            🎯 Test Website
+          </button>
+          <button class="tab" onclick="switchTab('workflows')">
+            📋 Test Results
+          </button>
+          <button class="tab" onclick="switchTab('about')">ℹ️ About</button>
+        </div>
+
+        <!-- Convert AC Tab -->
+        <div class="tab-content active" id="convert">
+          <div class="sample-buttons">
+            <button class="sample-btn" onclick="loadSample('facebook')">
+              📘 Facebook Login
+            </button>
+            <button class="sample-btn" onclick="loadSample('google')">
+              🔍 Google Search
+            </button>
+            <button class="sample-btn" onclick="loadSample('github')">
+              🐙 GitHub Login
+            </button>
+            <button class="sample-btn" onclick="clearForm()">🗑️ Clear</button>
+          </div>
+
+          <form id="acForm" onsubmit="processAC(event)">
+            <div class="form-group">
+              <label for="website_url">🌐 Website URL *</label>
+              <input
+                type="url"
+                id="website_url"
+                name="website_url"
+                required
+                placeholder="https://facebook.com"
+                style="font-size: 16px; font-weight: 500"
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="test_scenario">🎯 Test Scenario *</label>
+              <textarea
+                id="test_scenario"
+                name="test_scenario"
+                required
+                placeholder="What do you want to test? For example:&#10;&#10;- Login with valid credentials&#10;- Search for 'AI automation'&#10;- Navigate to pricing page&#10;- Submit contact form&#10;- Check if login button exists"
+                style="min-height: 120px"
+              ></textarea>
+            </div>
+
+            <div class="form-group">
+              <label for="test_title">📝 Test Title (optional)</label>
+              <input
+                type="text"
+                id="test_title"
+                name="test_title"
+                placeholder="e.g., Facebook Login Test"
+              />
+            </div>
+
+            <div class="form-group">
+              <div class="checkbox-group">
+                <input
+                  type="checkbox"
+                  id="execute_immediately"
+                  name="execute_immediately"
+                />
+                <label for="execute_immediately"
+                  >🔄 Test the website immediately after generating
+                  script</label
+                >
+              </div>
+            </div>
+
+            <div class="form-group">
+              <div class="checkbox-group">
+                <input
+                  type="checkbox"
+                  id="use_ai"
+                  name="use_ai"
+                  onchange="toggleAIOptions()"
+                />
+                <label for="use_ai"
+                  >🤖 Use AI to intelligently analyze and test the
+                  website</label
+                >
+              </div>
+            </div>
+
+            <div id="ai_options" style="display: none">
+              <div class="form-group">
+                <label for="openrouter_api_key">OpenRouter API Key *</label>
+                <input
+                  type="password"
+                  id="openrouter_api_key"
+                  name="openrouter_api_key"
+                  placeholder="sk-or-v1-..."
+                />
+                <small
+                  >Get your API key from
+                  <a href="https://openrouter.ai/keys" target="_blank"
+                    >OpenRouter</a
+                  ></small
+                >
+              </div>
+
+              <div class="form-group">
+                <label for="ai_model">AI Model</label>
+                <select id="ai_model" name="ai_model">
+                  <option value="anthropic/claude-3.5-sonnet">
+                    Claude 3.5 Sonnet (Recommended)
+                  </option>
+                  <option value="openai/gpt-4o">GPT-4o</option>
+                  <option value="openai/gpt-4o-mini">
+                    GPT-4o Mini (Faster)
+                  </option>
+                  <option value="anthropic/claude-3-opus">Claude 3 Opus</option>
+                  <option value="meta-llama/llama-3.1-70b-instruct">
+                    Llama 3.1 70B
+                  </option>
+                  <option value="google/gemini-pro-1.5">Gemini Pro 1.5</option>
+                </select>
+              </div>
+            </div>
+
+            <button type="submit" class="btn" id="submitBtn">
+              🎯 Generate Test & MCP Script
+            </button>
+          </form>
+
+          <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p>🔍 Analyzing website and generating test script...</p>
+          </div>
+
+          <div id="results"></div>
+        </div>
+
+        <!-- Workflows Tab -->
+        <div class="tab-content" id="workflows">
+          <div
+            style="
+              display: flex;
+              justify-content: between;
+              align-items: center;
+              margin-bottom: 20px;
+            "
+          >
+            <h2>📋 Generated Workflows</h2>
+            <button class="btn btn-secondary" onclick="loadWorkflows()">
+              🔄 Refresh
+            </button>
+          </div>
+          <div id="workflowList">
+            <p>Click "Refresh" to load workflows...</p>
+          </div>
+        </div>
+
+        <!-- About Tab -->
+        <div class="tab-content" id="about">
+          <h2>ℹ️ About AC to Automation Converter</h2>
+          <p>
+            <strong
+              >Welcome to the Acceptance Criteria to Automation
+              Converter!</strong
+            >
+          </p>
+          <p>
+            This tool helps QA engineers and developers automatically convert
+            acceptance criteria written in Gherkin (BDD) format or plain text
+            into executable browser automation scripts.
+          </p>
+
+          <h3>🚀 Features</h3>
+          <ul>
+            <li>
+              <strong>Gherkin Support:</strong> Parse Given-When-Then scenarios
+            </li>
+            <li>
+              <strong>Multiple Script Formats:</strong> Generate MCP Browser,
+              Selenium, and Playwright scripts
+            </li>
+            <li>
+              <strong>Simulation Execution:</strong> Test your workflows with
+              simulated browser interactions
+            </li>
+            <li>
+              <strong>Smart Parsing:</strong> Intelligent extraction of actions
+              from natural language
+            </li>
+            <li>
+              <strong>Workflow Management:</strong> Save and manage multiple
+              automation workflows
+            </li>
+          </ul>
+
+          <h3>📝 Supported Formats</h3>
+          <h4>Gherkin/BDD Format:</h4>
+          <pre>
+Scenario: User login
+Given I am on the login page
+When I enter valid credentials
+And I click the login button
+Then I should be redirected to dashboard</pre
+          >
+
+          <h4>Plain Text Format:</h4>
+          <pre>
+User should be able to submit contact form
+Navigate to contact page, fill form, submit, verify success</pre
+          >
+
+          <h3>🔧 Generated Actions</h3>
+          <ul>
+            <li><strong>Navigation:</strong> "visit", "navigate", "go to"</li>
+            <li><strong>Interactions:</strong> "click", "press", "select"</li>
+            <li><strong>Input:</strong> "type", "enter", "fill"</li>
+            <li><strong>Verification:</strong> "see", "display", "show"</li>
+          </ul>
+
+          <h3>🎯 How to Use</h3>
+          <ol>
+            <li>Enter your test title and feature name</li>
+            <li>
+              Paste your acceptance criteria in Gherkin or plain text format
+            </li>
+            <li>Add relevant tags for organization</li>
+            <li>Choose whether to run simulation immediately</li>
+            <li>
+              Click "Convert & Generate" to create your automation workflow
+            </li>
+            <li>View generated scripts and execution reports</li>
+          </ol>
+
+          <p>
+            <em
+              >Built with Rust, Axum, and modern web technologies. Powered by
+              intelligent natural language processing for test automation.</em
+            >
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // Sample data
+      const samples = {
+        facebook: {
+          website_url: "https://facebook.com",
+          test_scenario: `Login to Facebook account:
+
+- Navigate to the login page
+- Enter email: test@example.com
+- Enter password: password123
+- Click the Login button
+- Verify successful login by checking profile presence`,
+          test_title: "Facebook Login Test",
+        },
+        google: {
+          website_url: "https://google.com",
+          test_scenario: `Search for AI automation tools:
+
+- Navigate to Google homepage
+- Click on the search box
+- Type "AI automation tools"
+- Press Enter or click Search button
+- Verify search results are displayed
+- Click on the first result`,
+          test_title: "Google Search Test",
+        },
+        github: {
+          website_url: "https://github.com",
+          test_scenario: `Login to GitHub and navigate to repositories:
+
+- Go to GitHub login page
+- Enter username and password
+- Click Sign in button
+- Navigate to repositories tab
+- Verify repositories are listed
+- Check if "New" repository button exists`,
+          test_title: "GitHub Login and Navigation Test",
+        },
+      };
+
+      // Tab switching
+      function switchTab(tabName) {
+        // Hide all tab contents
+        document.querySelectorAll(".tab-content").forEach((content) => {
+          content.classList.remove("active");
+        });
+
+        // Remove active class from all tabs
+        document.querySelectorAll(".tab").forEach((tab) => {
+          tab.classList.remove("active");
+        });
+
+        // Show selected tab content
+        document.getElementById(tabName).classList.add("active");
+
+        // Add active class to selected tab
+        event.target.classList.add("active");
+
+        // Load workflows when switching to workflows tab
+        if (tabName === "workflows") {
+          loadWorkflows();
+        }
+      }
+
+      // Load sample data
+      function loadSample(sampleType) {
+        const sample = samples[sampleType];
+        if (sample) {
+          document.getElementById("website_url").value = sample.website_url;
+          document.getElementById("test_scenario").value = sample.test_scenario;
+          document.getElementById("test_title").value = sample.test_title;
+        }
+      }
+
+      // Clear form
+      function clearForm() {
+        document.getElementById("acForm").reset();
+        document.getElementById("results").innerHTML = "";
+      }
+
+      // Process AC form submission
+      async function processAC(event) {
+        event.preventDefault();
+
+        const submitBtn = document.getElementById("submitBtn");
+        const loading = document.getElementById("loading");
+        const results = document.getElementById("results");
+
+        // Show loading state
+        submitBtn.disabled = true;
+        loading.style.display = "block";
+        results.innerHTML = "";
+
+        try {
+          const formData = new FormData(event.target);
+
+          // Convert FormData to proper format
+          const data = {};
+          for (let [key, value] of formData.entries()) {
+            if (key === "execute_immediately" || key === "use_ai") {
+              data[key] = value === "on";
+            } else {
+              data[key] = value || "";
+            }
+          }
+
+          console.log("Sending data:", data);
+
+          const response = await fetch("/api/process", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Accept: "application/json",
+            },
+            body: JSON.stringify(data),
+          });
+
+          const result = await response.json();
+
+          if (result.success) {
+            displayResults(result);
+          } else {
+            displayError(result.message);
+          }
+        } catch (error) {
+          displayError("Network error: " + error.message);
+        } finally {
+          submitBtn.disabled = false;
+          loading.style.display = "none";
+        }
+      }
+
+      // Display successful results
+      function displayResults(result) {
+        const resultsDiv = document.getElementById("results");
+
+        let executionHtml = "";
+        if (result.execution_report) {
+          const report = result.execution_report;
+          const successRate = report.success_rate * 100;
+          const rateClass =
+            successRate >= 80 ? "high" : successRate >= 60 ? "medium" : "low";
+
+          executionHtml = `
+                    <div class="execution-report">
+                        <h3>📊 Execution Report</h3>
+                        <div class="success-rate ${rateClass}">Success Rate: ${successRate.toFixed(
+            1
+          )}%</div>
+                        <p><strong>✅ Successful Steps:</strong> ${
+                          report.successful_steps
+                        }</p>
+                        <p><strong>❌ Failed Steps:</strong> ${
+                          report.failed_steps
+                        }</p>
+                        <p><strong>⏱️ Total Steps:</strong> ${
+                          report.total_steps
+                        }</p>
+                    </div>
+                `;
+        }
+
+        let workflowHtml = "";
+        if (result.ai_used && result.ai_plan) {
+          // AI-generated plan display
+          workflowHtml = `
+            <div class="workflow-section">
+              <h3>🤖 AI-Generated Plan</h3>
+              <p><strong>Title:</strong> ${result.ai_plan.title}</p>
+              <p><strong>Description:</strong> ${result.ai_plan.description}</p>
+              <p><strong>Estimated Duration:</strong> ${
+                result.ai_plan.estimated_duration
+              }s</p>
+              <p><strong>Steps:</strong> ${result.ai_plan.steps.length}</p>
+              <p><strong>Assertions:</strong> ${
+                result.ai_plan.assertions.length
+              }</p>
+              
+              <h4>AI Execution Steps:</h4>
+              <ul class="step-list">
+                ${result.ai_plan.steps
+                  .map(
+                    (step, index) => `
+                  <li class="step-item">
+                    <div class="step-type">${step.action}</div>
+                    <div>${
+                      step.selector || step.url || step.text || "No details"
+                    }</div>
+                    <small>Screenshot: ${step.screenshot ? "Yes" : "No"}</small>
+                  </li>
+                `
+                  )
+                  .join("")}
+              </ul>
+              
+              <h4>AI Assertions:</h4>
+              <ul class="step-list">
+                ${result.ai_plan.assertions
+                  .map(
+                    (assertion) => `
+                  <li class="step-item">
+                    <div class="step-type">VERIFY</div>
+                    <div>${assertion}</div>
+                  </li>
+                `
+                  )
+                  .join("")}
+              </ul>
+            </div>
+          `;
+        } else if (result.workflow) {
+          // Standard workflow display
+          workflowHtml = `
+            <div class="workflow-section">
+              <h3>🤖 Workflow Details</h3>
+              <p><strong>Name:</strong> ${result.workflow.name}</p>
+              <p><strong>Description:</strong> ${
+                result.workflow.description
+              }</p>
+              <p><strong>Steps:</strong> ${
+                result.workflow.test_steps.length
+              }</p>
+              <div class="workflow-tags">
+                ${result.workflow.tags
+                  .map((tag) => `<span class="tag">${tag}</span>`)
+                  .join("")}
+              </div>
+              
+              <h4>Test Steps:</h4>
+              <ul class="step-list">
+                ${result.workflow.test_steps
+                  .map(
+                    (step, index) => `
+                  <li class="step-item">
+                    <div class="step-type">${step.step_type}</div>
+                    <div>${step.description}</div>
+                    <small>${step.browser_actions.length} actions, ${step.assertions.length} assertions</small>
+                  </li>
+                `
+                  )
+                  .join("")}
+              </ul>
+            </div>
+          `;
+        }
+
+        let aiReasoningHtml = "";
+        if (result.ai_used && result.ai_reasoning) {
+          aiReasoningHtml = `
+            <div class="workflow-section">
+              <h3>🧠 AI Reasoning</h3>
+              <div class="script-container">${escapeHtml(
+                result.ai_reasoning
+              )}</div>
+            </div>
+          `;
+        }
+
+        resultsDiv.innerHTML = `
+          <div class="results success">
+            <h3>✅ Successfully Generated Automation ${
+              result.ai_used ? "with AI!" : "Workflow!"
+            }</h3>
+            <p><strong>Workflow ID:</strong> ${result.workflow_id}</p>
+            <p><strong>Message:</strong> ${result.message}</p>
+            ${
+              result.ai_used
+                ? "<p><strong>🤖 AI Model Used:</strong> Intelligent automation via OpenRouter LLM</p>"
+                : ""
+            }
+            
+            ${executionHtml}
+            
+            <div class="workflow-details">
+              ${workflowHtml}
+              
+              <div class="workflow-section">
+                <h3>🔧 Generated MCP Browser Script</h3>
+                <div>
+                  <h4>${
+                    result.ai_used ? "AI-Generated" : "Standard"
+                  } MCP Script:</h4>
+                  <div class="script-container">${escapeHtml(
+                    result.mcp_script
+                  )}</div>
+                </div>
+                <div style="margin-top: 15px;">
+                  <button class="btn btn-secondary" onclick="downloadMCPScript('${
+                    result.workflow_id
+                  }')">📥 Download MCP Script</button>
+                  ${
+                    !result.ai_used
+                      ? `
+                    <button class="btn btn-secondary" onclick="downloadScript('${result.workflow_id}', 'selenium')">📥 Download Selenium</button>
+                    <button class="btn btn-secondary" onclick="downloadScript('${result.workflow_id}', 'playwright')">📥 Download Playwright</button>
+                  `
+                      : ""
+                  }
+                </div>
+              </div>
+              
+              ${aiReasoningHtml}
+            </div>
+          </div>
+        `;
+      }
+
+      // Display error
+      function displayError(message) {
+        const resultsDiv = document.getElementById("results");
+        resultsDiv.innerHTML = `
+                <div class="results error">
+                    <h3>❌ Error</h3>
+                    <p>${message}</p>
+                </div>
+            `;
+      }
+
+      // Load workflows
+      async function loadWorkflows() {
+        try {
+          const response = await fetch("/api/workflows", {
+            method: "GET",
+            mode: "cors",
+          });
+          const result = await response.json();
+
+          const workflowListDiv = document.getElementById("workflowList");
+
+          if (result.workflows.length === 0) {
+            workflowListDiv.innerHTML =
+              "<p>No workflows found. Create some by converting acceptance criteria!</p>";
+            return;
+          }
+
+          workflowListDiv.innerHTML = `
+                    <div class="workflow-list">
+                        ${result.workflows
+                          .map(
+                            (workflow) => `
+                            <div class="workflow-card">
+                                <h4>${workflow.name}</h4>
+                                <p>${workflow.description}</p>
+                                <p><strong>Steps:</strong> ${
+                                  workflow.step_count
+                                }</p>
+                                <div class="workflow-tags">
+                                    ${workflow.tags
+                                      .map(
+                                        (tag) =>
+                                          `<span class="tag">${tag}</span>`
+                                      )
+                                      .join("")}
+                                </div>
+                                <div style="margin-top: 15px;">
+                                    <button class="btn btn-secondary" onclick="executeWorkflow('${
+                                      workflow.id
+                                    }')">▶️ Execute</button>
+                                    <button class="btn btn-secondary" onclick="downloadScript('${
+                                      workflow.id
+                                    }', 'mcp_browser')">📥 Script</button>
+                                </div>
+                            </div>
+                        `
+                          )
+                          .join("")}
+                    </div>
+                `;
+        } catch (error) {
+          document.getElementById(
+            "workflowList"
+          ).innerHTML = `<p>Error loading workflows: ${error.message}</p>`;
+        }
+      }
+
+      // Execute workflow
+      async function executeWorkflow(workflowId) {
+        try {
+          const response = await fetch(`/api/execute/${workflowId}`, {
+            method: "POST",
+            mode: "cors",
+          });
+          const report = await response.json();
+
+          const successRate = report.success_rate * 100;
+          const rateClass =
+            successRate >= 80 ? "high" : successRate >= 60 ? "medium" : "low";
+
+          alert(
+            `Execution completed!\nSuccess Rate: ${successRate.toFixed(
+              1
+            )}%\nSuccessful: ${report.successful_steps}\nFailed: ${
+              report.failed_steps
+            }`
+          );
+        } catch (error) {
+          alert("Error executing workflow: " + error.message);
+        }
+      }
+
+      // Download script
+      async function downloadScript(workflowId, format) {
+        try {
+          const response = await fetch(
+            `/api/script/${workflowId}?format=${format}`,
+            {
+              method: "GET",
+              mode: "cors",
+            }
+          );
+          const script = await response.text();
+
+          const blob = new Blob([script], { type: "text/plain" });
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `${workflowId}_${format}.${
+            format === "selenium" ? "py" : "js"
+          }`;
+          document.body.appendChild(a);
+          a.click();
+          window.URL.revokeObjectURL(url);
+          document.body.removeChild(a);
+        } catch (error) {
+          alert("Error downloading script: " + error.message);
+        }
+      }
+
+      // Download MCP script directly from result
+      function downloadMCPScript(workflowId) {
+        const scriptContent =
+          document.querySelector(".script-container").textContent;
+        const blob = new Blob([scriptContent], { type: "text/javascript" });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${workflowId}_mcp_browser.js`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+      }
+
+      // Utility function to escape HTML
+      function escapeHtml(text) {
+        const div = document.createElement("div");
+        div.textContent = text;
+        return div.innerHTML;
+      }
+
+      // Toggle AI options visibility
+      function toggleAIOptions() {
+        const useAI = document.getElementById("use_ai").checked;
+        const aiOptions = document.getElementById("ai_options");
+        const apiKeyField = document.getElementById("openrouter_api_key");
+
+        if (useAI) {
+          aiOptions.style.display = "block";
+          apiKeyField.required = true;
+        } else {
+          aiOptions.style.display = "none";
+          apiKeyField.required = false;
+        }
+      }
+
+      // Load workflows on page load
+      document.addEventListener("DOMContentLoaded", function () {
+        // Set default sample
+        loadSample("facebook");
+      });
+    </script>
+  </body>
+</html>

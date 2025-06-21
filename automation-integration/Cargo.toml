@@ -1,0 +1,14 @@
+[package]
+name = "automation-integration"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+rmcp.workspace = true
+uuid.workspace = true
+automation-api = { path = "../automation-api" }
+automation-browser = { path = "../automation-browser" }
