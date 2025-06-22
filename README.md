@@ -442,6 +442,63 @@ curl http://localhost:3001/api/env-status
 - **automation-integration**: Pipeline orchestration
 - **automation-ai**: AI model integration
 
+## 🚀 **NEW: Enhanced OpenRouter LLM Vision Demo**
+
+Experience the latest OpenRouter integration with cutting-edge vision models:
+
+```bash
+# Set your API key
+export OPENROUTER_API_KEY=sk-or-v1-your-key-here
+
+# Run the comprehensive computer vision demo
+cargo run --example computer_vision_demo -p automation-browser
+
+# 🔥 NEW: Run the enhanced OpenRouter LLM vision demo
+cargo run --example openrouter_vision_demo -p automation-browser
+
+# Run the enhanced Google search demo
+cargo run --example enhanced_google_search -p automation-browser
+```
+
+### ✨ **Latest OpenRouter Features**
+
+**🎯 Enhanced Model Support (Updated 2024)**:
+
+- `anthropic/claude-3-5-sonnet-20241022` - Latest Claude 3.5 Sonnet
+- `openai/gpt-4o-2024-11-20` - Latest GPT-4o
+- `openai/gpt-4o-mini-2024-07-18` - Budget-friendly vision
+- `google/gemini-pro-1.5` - Google's vision model
+- `anthropic/claude-3-5-haiku-20241022` - Fast HTML analysis
+
+**⚡ Auto-Optimization Features**:
+
+- Automatic model selection for each strategy
+- Model-specific prompt engineering
+- Enhanced error handling with detailed messages
+- Performance benchmarks and comparisons
+
+**🧠 Smart Vision Strategies**:
+
+- **DOM Inspection**: AI analyzes HTML (faster, cheaper)
+- **Coordinate-Based**: AI analyzes screenshots (more robust)
+- **Adaptive**: Tries DOM first, falls back to coordinates
+
+**Example Usage**:
+
+```rust
+let mut engine = ChromeAutomationEngine::new(false)
+    .with_vision_mode(api_key, None)
+    .with_vision_strategy(VisionStrategy::Adaptive);
+
+// Use convenient model shortcuts
+engine.set_vision_model("claude"); // → claude-3-5-sonnet-20241022
+engine.set_vision_model("gpt-4o"); // → gpt-4o-2024-11-20
+engine.set_vision_model("gpt-4o-mini"); // → gpt-4o-mini-2024-07-18
+
+// Auto-optimize for strategy
+engine.with_optimal_model_for_strategy(&VisionStrategy::CoordinateBased);
+```
+
 ## 🤝 Contributing
 
 We welcome contributions! Here's how to get started:

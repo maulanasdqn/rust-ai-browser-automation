@@ -1,4 +1,4 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -61,8 +61,7 @@
       }
 
       .neon-glow {
-        box-shadow:
-          0 0 20px rgba(59, 130, 246, 0.5),
+        box-shadow: 0 0 20px rgba(59, 130, 246, 0.5),
           0 0 40px rgba(59, 130, 246, 0.3);
       }
 
@@ -146,10 +145,11 @@
               <h1
                 class="text-3xl font-bold bg-gradient-to-r from-purple-600 via-pink-600 to-blue-600 bg-clip-text text-transparent"
               >
-                AI Browser Automation
+                AI Browser Automation + Computer Vision
               </h1>
               <p class="text-gray-600 text-sm font-medium">
-                ✨ Intelligent testing powered by AI magic ✨
+                ✨ Intelligent testing powered by AI magic & Computer Vision 👁️
+                ✨
               </p>
             </div>
           </div>
@@ -340,6 +340,108 @@
               </div>
             </div>
 
+            <!-- 👁️ Computer Vision Options -->
+            <div
+              class="bg-gradient-to-r from-cyan-100 via-blue-100 to-indigo-100 rounded-2xl p-6 border-2 border-cyan-200"
+            >
+              <div class="flex items-center mb-4">
+                <input
+                  type="checkbox"
+                  id="use_vision"
+                  name="use_vision"
+                  class="mr-3 h-5 w-5 text-cyan-600 focus:ring-cyan-500 border-cyan-300 rounded-lg"
+                />
+                <label
+                  for="use_vision"
+                  class="font-bold text-cyan-800 text-lg flex items-center"
+                >
+                  <div
+                    class="bg-gradient-to-r from-cyan-500 to-blue-500 p-2 rounded-full mr-3 animate-pulse-slow"
+                  >
+                    <i class="fas fa-eye text-white"></i>
+                  </div>
+                  👁️ Computer Vision Mode (Like Skyvern!)
+                </label>
+              </div>
+              <p
+                class="text-cyan-700 font-medium mb-4 text-center bg-white/50 rounded-lg p-3"
+              >
+                🔮 AI "sees" web pages like humans and finds elements visually!
+                Perfect for complex UIs! ✨
+              </p>
+
+              <!-- Vision Strategy Selection -->
+              <div id="vision-options" class="space-y-4 hidden">
+                <div>
+                  <label class="block text-sm font-bold text-cyan-700 mb-2">
+                    <i class="fas fa-cogs text-cyan-500 mr-2"></i>
+                    Vision Strategy
+                  </label>
+                  <select
+                    id="vision_strategy"
+                    name="automation_mode"
+                    class="w-full px-4 py-3 border-2 border-cyan-300 rounded-lg focus:ring-4 focus:ring-cyan-500 focus:border-cyan-500 transition-all duration-300 bg-white/70"
+                  >
+                    <option value="adaptive">
+                      🎯 Adaptive (DOM + Vision) - Recommended
+                    </option>
+                    <option value="dom_inspection">
+                      ⚡ DOM Inspection (Fast & Cheap)
+                    </option>
+                    <option value="coordinate_based">
+                      🎨 Coordinate-Based (Most Robust)
+                    </option>
+                  </select>
+                  <p class="text-xs text-cyan-600 mt-1 font-medium">
+                    Adaptive tries DOM first, falls back to visual analysis
+                  </p>
+                </div>
+
+                <!-- Vision Model Selection -->
+                <div>
+                  <label class="block text-sm font-bold text-cyan-700 mb-2">
+                    <i class="fas fa-robot text-cyan-500 mr-2"></i>
+                    Vision AI Model
+                  </label>
+                  <select
+                    id="vision_model"
+                    name="vision_model"
+                    class="w-full px-4 py-3 border-2 border-cyan-300 rounded-lg focus:ring-4 focus:ring-cyan-500 focus:border-cyan-500 transition-all duration-300 bg-white/70"
+                  >
+                    <option value="anthropic/claude-3.5-sonnet">
+                      🧠 Claude 3.5 Sonnet (Best for HTML)
+                    </option>
+                    <option value="openai/gpt-4o">
+                      👁️ GPT-4o (Best for Screenshots)
+                    </option>
+                    <option value="openai/gpt-4o-mini">
+                      💰 GPT-4o Mini (Budget Option)
+                    </option>
+                  </select>
+                </div>
+
+                <!-- Vision API Key (optional separate key) -->
+                <div>
+                  <label
+                    class="block text-sm font-bold text-cyan-700 mb-2 flex items-center"
+                  >
+                    <i class="fas fa-key text-cyan-500 mr-2"></i>
+                    Vision API Key (Optional)
+                  </label>
+                  <input
+                    type="password"
+                    id="vision_api_key"
+                    name="vision_api_key"
+                    placeholder="🔑 Optional: Use different key for vision"
+                    class="w-full px-4 py-3 border-2 border-cyan-300 rounded-lg focus:ring-4 focus:ring-cyan-500 focus:border-cyan-500 transition-all duration-300 placeholder-cyan-400 bg-white/70"
+                  />
+                  <p class="text-xs text-cyan-600 mt-1 font-medium">
+                    Leave empty to use main API key
+                  </p>
+                </div>
+              </div>
+            </div>
+
             <!-- Fun Options -->
             <div
               class="flex items-center justify-center space-x-8 flex-wrap bg-gradient-to-r from-blue-50 to-purple-50 p-6 rounded-2xl border-2 border-blue-200"
@@ -464,12 +566,14 @@
             🎨 Fun Example Templates 🎨
           </h3>
 
-          <div class="grid md:grid-cols-3 gap-6">
+          <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <!-- Traditional DOM Example -->
             <div
               class="example-card bg-gradient-to-br from-blue-100 to-purple-100 p-6 border-2 border-blue-300 rounded-2xl hover:border-purple-400 hover:from-purple-100 hover:to-pink-100 transition-all duration-300 cursor-pointer transform hover:scale-105 hover:shadow-2xl"
               data-url="https://backoffice.najmcourse.com/auth/login"
-              data-title="🔐 Epic Login Test"
-              data-scenario="🎭 Login with magical credentials:&#10;👤 admin@example.com&#10;🔐 password123&#10;&#10;✅ Verify dashboard appears like magic!"
+              data-title="🔐 Classic Login Test"
+              data-scenario="🎭 Login with magical credentials:&#10;👤 Click the email field&#10;👤 Type: admin@example.com&#10;🔐 Click the password field&#10;🔐 Type: password123&#10;🚀 Click the login button&#10;✅ Verify dashboard appears!"
+              data-vision="false"
             >
               <div
                 class="text-blue-600 text-4xl mb-4 text-center animate-bounce-slow"
@@ -477,49 +581,97 @@
                 <i class="fas fa-sign-in-alt"></i>
               </div>
               <h4 class="font-bold text-gray-800 mb-2 text-xl text-center">
-                🔐 Login Magic
+                🔐 DOM Login
               </h4>
               <p class="text-gray-600 text-center font-medium">
-                Test user authentication with style!
+                Traditional selector-based automation
               </p>
+              <div class="mt-3 bg-blue-50 rounded-lg p-2 text-center">
+                <span class="text-xs font-bold text-blue-700"
+                  >⚡ Fast & Reliable</span
+                >
+              </div>
             </div>
 
+            <!-- Computer Vision Example -->
             <div
-              class="example-card bg-gradient-to-br from-green-100 to-blue-100 p-6 border-2 border-green-300 rounded-2xl hover:border-blue-400 hover:from-blue-100 hover:to-purple-100 transition-all duration-300 cursor-pointer transform hover:scale-105 hover:shadow-2xl"
+              class="example-card bg-gradient-to-br from-cyan-100 to-blue-100 p-6 border-2 border-cyan-300 rounded-2xl hover:border-blue-400 hover:from-blue-100 hover:to-indigo-100 transition-all duration-300 cursor-pointer transform hover:scale-105 hover:shadow-2xl"
               data-url="https://www.google.com"
-              data-title="🔍 Search Adventure"
-              data-scenario="🎯 Search for 'AI browser automation magic'&#10;✨ Click on the most magical result&#10;🎉 Verify page loads successfully!"
+              data-title="👁️ Vision Google Search"
+              data-scenario="🔮 Use AI Vision to find elements:&#10;👁️ Find the Google search input box&#10;⌨️ Type: computer vision automation&#10;👁️ Find and click the Search button&#10;✅ Verify search results appear!"
+              data-vision="true"
+              data-mode="adaptive"
+            >
+              <div
+                class="text-cyan-600 text-4xl mb-4 text-center animate-bounce-slow"
+              >
+                <i class="fas fa-eye"></i>
+              </div>
+              <h4 class="font-bold text-gray-800 mb-2 text-xl text-center">
+                👁️ Vision Search
+              </h4>
+              <p class="text-gray-600 text-center font-medium">
+                AI sees the page like humans do!
+              </p>
+              <div class="mt-3 bg-cyan-50 rounded-lg p-2 text-center">
+                <span class="text-xs font-bold text-cyan-700"
+                  >🎯 Smart & Adaptive</span
+                >
+              </div>
+            </div>
+
+            <!-- Hybrid Example -->
+            <div
+              class="example-card bg-gradient-to-br from-green-100 to-emerald-100 p-6 border-2 border-green-300 rounded-2xl hover:border-emerald-400 hover:from-emerald-100 hover:to-green-100 transition-all duration-300 cursor-pointer transform hover:scale-105 hover:shadow-2xl"
+              data-url="https://amazon.com"
+              data-title="🛒 Smart Shopping Test"
+              data-scenario="🛍️ Intelligent product search:&#10;👁️ Find the search box (AI Vision)&#10;⌨️ Type: wireless headphones&#10;👁️ Find and click search button&#10;👁️ Click on first product image&#10;🎯 Find 'Add to Cart' button&#10;✅ Verify item added to cart!"
+              data-vision="true"
+              data-mode="hybrid"
             >
               <div
                 class="text-green-600 text-4xl mb-4 text-center animate-bounce-slow"
               >
-                <i class="fas fa-search"></i>
+                <i class="fas fa-shopping-cart"></i>
               </div>
               <h4 class="font-bold text-gray-800 mb-2 text-xl text-center">
-                🔍 Search Magic
+                🛒 Smart Shopping
               </h4>
               <p class="text-gray-600 text-center font-medium">
-                Discover the power of search automation!
+                Hybrid DOM + Vision automation
               </p>
+              <div class="mt-3 bg-green-50 rounded-lg p-2 text-center">
+                <span class="text-xs font-bold text-green-700"
+                  >🔀 Best of Both</span
+                >
+              </div>
             </div>
 
+            <!-- Advanced Vision Example -->
             <div
               class="example-card bg-gradient-to-br from-purple-100 to-pink-100 p-6 border-2 border-purple-300 rounded-2xl hover:border-pink-400 hover:from-pink-100 hover:to-red-100 transition-all duration-300 cursor-pointer transform hover:scale-105 hover:shadow-2xl"
-              data-url="https://example.com/contact"
-              data-title="📝 Form Wizard"
-              data-scenario="🎪 Fill magical contact form:&#10;👤 Name: Automation Wizard&#10;📧 Email: wizard@magic.com&#10;💬 Message: This is pure magic!&#10;🚀 Submit with style!"
+              data-url="https://example.com/complex-form"
+              data-title="🎨 Visual Form Wizard"
+              data-scenario="🎪 Pure vision form filling:&#10;👁️ Find name input field visually&#10;⌨️ Type: Vision Wizard&#10;👁️ Find email field by appearance&#10;⌨️ Type: wizard@vision.ai&#10;👁️ Find the blue submit button&#10;🚀 Click submit using coordinates!"
+              data-vision="true"
+              data-mode="coordinate_based"
             >
               <div
                 class="text-purple-600 text-4xl mb-4 text-center animate-bounce-slow"
               >
-                <i class="fas fa-edit"></i>
+                <i class="fas fa-palette"></i>
               </div>
               <h4 class="font-bold text-gray-800 mb-2 text-xl text-center">
-                📝 Form Magic
+                🎨 Visual Form
               </h4>
               <p class="text-gray-600 text-center font-medium">
-                Automate form submissions like a wizard!
+                Pure coordinate-based vision
               </p>
+              <div class="mt-3 bg-purple-50 rounded-lg p-2 text-center">
+                <span class="text-xs font-bold text-purple-700"
+                  >🎯 Most Robust</span
+                >
+              </div>
             </div>
           </div>
         </div>
@@ -533,13 +685,29 @@
           <p
             class="text-lg font-bold bg-gradient-to-r from-purple-600 via-pink-600 to-blue-600 bg-clip-text text-transparent mb-2"
           >
-            🦄 Built with Rust, AI, and pure magic for developers who love
-            automation! 🦄
+            🦄 Built with Rust, AI Computer Vision, and pure magic for
+            developers who love automation! 🦄
           </p>
           <p class="text-gray-600 font-medium">
-            ✨ AI-powered browser automation with real-time execution and
-            infinite possibilities! ✨
+            ✨ AI-powered browser automation with Computer Vision, real-time
+            execution and infinite possibilities! ✨
           </p>
+          <div
+            class="mt-3 flex flex-wrap justify-center gap-4 text-sm font-medium"
+          >
+            <span class="bg-blue-100 text-blue-800 px-3 py-1 rounded-full"
+              >⚡ DOM Automation</span
+            >
+            <span class="bg-cyan-100 text-cyan-800 px-3 py-1 rounded-full"
+              >👁️ Computer Vision</span
+            >
+            <span class="bg-purple-100 text-purple-800 px-3 py-1 rounded-full"
+              >🧠 AI-Powered</span
+            >
+            <span class="bg-green-100 text-green-800 px-3 py-1 rounded-full"
+              >🔀 Adaptive Strategy</span
+            >
+          </div>
           <div class="mt-4 flex justify-center space-x-4">
             <span class="text-2xl animate-bounce-slow">🚀</span>
             <span class="text-2xl animate-pulse-slow">⚡</span>
@@ -634,6 +802,26 @@
           document.getElementById("test_scenario").value =
             this.dataset.scenario.replace(/&#10;/g, "\n");
 
+          // Handle computer vision settings
+          const useVision = this.dataset.vision === "true";
+          const visionMode = this.dataset.mode;
+
+          if (useVision) {
+            document.getElementById("use_vision").checked = true;
+            if (visionMode) {
+              document.getElementById("vision_strategy").value = visionMode;
+            }
+
+            // Show a visual indicator that this is a vision example
+            const visionCheckbox = document.getElementById("use_vision");
+            visionCheckbox.parentElement.classList.add("animate-pulse");
+            setTimeout(() => {
+              visionCheckbox.parentElement.classList.remove("animate-pulse");
+            }, 2000);
+          } else {
+            document.getElementById("use_vision").checked = false;
+          }
+
           // Smooth scroll to form
           document
             .getElementById("automationForm")
@@ -702,13 +890,13 @@
               resultsContainer.innerHTML = createSuccessResultsHTML(result);
             } else {
               resultsContainer.innerHTML = createErrorResultsHTML(
-                result.message,
+                result.message
               );
             }
           } catch (error) {
             console.error("Error:", error);
             resultsContainer.innerHTML = createErrorResultsHTML(
-              "Network error occurred",
+              "Network error occurred"
             );
           } finally {
             submitButton.disabled = false;
@@ -766,15 +954,53 @@
               </h5>
               <div class="grid md:grid-cols-2 gap-4 text-blue-700 font-medium">
                 <p><strong>🎯 Title:</strong> ${escapeHtml(
-                  result.ai_plan.title,
+                  result.ai_plan.title
                 )}</p>
                 <p><strong>📝 Description:</strong> ${escapeHtml(
-                  result.ai_plan.description,
+                  result.ai_plan.description
                 )}</p>
                 <p><strong>🔧 Steps:</strong> ${result.ai_plan.steps.length}</p>
                 <p><strong>⏱️ Duration:</strong> ${
                   result.ai_plan.estimated_duration
                 }s</p>
+              </div>
+            </div>
+          `;
+        }
+
+        // Check if computer vision was used by examining logs
+        const visionLogsCount = (result.execution_logs || []).filter(
+          (log) =>
+            log.step_type === "vision" ||
+            log.step_type === "blocking" ||
+            log.step_type === "ai_html" ||
+            log.step_type === "dom_strategy" ||
+            log.message.includes("Vision") ||
+            log.message.includes("AI DOM") ||
+            log.message.includes("blocking element")
+        ).length;
+
+        if (visionLogsCount > 0) {
+          html += `
+            <div class="mt-6 p-6 bg-gradient-to-r from-cyan-50 via-blue-50 to-indigo-50 border-2 border-cyan-200 rounded-2xl">
+              <h5 class="font-bold text-xl mb-4 flex items-center">
+                <div class="bg-gradient-to-r from-cyan-500 to-blue-600 p-3 rounded-full mr-3 animate-pulse-slow">
+                  <i class="fas fa-eye text-white"></i>
+                </div>
+                <span class="bg-gradient-to-r from-cyan-600 to-blue-600 bg-clip-text text-transparent">
+                  👁️ Computer Vision Analysis
+                </span>
+              </h5>
+              <div class="grid md:grid-cols-2 gap-4 text-cyan-700 font-medium">
+                <p><strong>🔮 Vision Events:</strong> ${visionLogsCount}</p>
+                <p><strong>🧠 AI Strategy:</strong> Smart Adaptive</p>
+                <p><strong>📸 Screenshots:</strong> Auto-captured</p>
+                <p><strong>🎯 Element Detection:</strong> AI-powered</p>
+              </div>
+              <div class="mt-4 bg-cyan-100 rounded-lg p-3">
+                <p class="text-cyan-800 font-medium text-center">
+                  ✨ AI successfully analyzed page visually and found elements like a human! 👁️
+                </p>
               </div>
             </div>
           `;
@@ -836,7 +1062,26 @@
         logContainer.innerHTML = logs
           .map((log) => {
             const levelClass = `log-${log.level.toLowerCase()}`;
-            return `<div class="log-entry ${levelClass}">[${log.timestamp}] ${log.level}: ${log.message}</div>`;
+
+            // Add special styling for vision-related logs
+            let visionIcon = "";
+            if (log.step_type === "vision" || log.message.includes("Vision")) {
+              visionIcon = "👁️ ";
+            } else if (
+              log.step_type === "blocking" ||
+              log.message.includes("blocking")
+            ) {
+              visionIcon = "🔲 ";
+            } else if (
+              log.step_type === "ai_html" ||
+              log.message.includes("AI HTML")
+            ) {
+              visionIcon = "🧠 ";
+            } else if (log.step_type === "dom_strategy") {
+              visionIcon = "⚡ ";
+            }
+
+            return `<div class="log-entry ${levelClass}">[${log.timestamp}] ${visionIcon}${log.level}: ${log.message}</div>`;
           })
           .join("");
       }
@@ -856,9 +1101,32 @@
         return div.innerHTML;
       }
 
+      // Vision mode toggle handler
+      document
+        .getElementById("use_vision")
+        .addEventListener("change", function () {
+          const visionOptions = document.getElementById("vision-options");
+          if (this.checked) {
+            visionOptions.classList.remove("hidden");
+            visionOptions.classList.add("animate-pulse");
+            setTimeout(() => {
+              visionOptions.classList.remove("animate-pulse");
+            }, 1000);
+          } else {
+            visionOptions.classList.add("hidden");
+          }
+        });
+
       // Initialize page
       document.addEventListener("DOMContentLoaded", function () {
         checkEnvironmentStatus();
+
+        // Set up vision mode toggle
+        const visionCheckbox = document.getElementById("use_vision");
+        const visionOptions = document.getElementById("vision-options");
+        if (visionCheckbox.checked) {
+          visionOptions.classList.remove("hidden");
+        }
       });
     </script>
   </body>

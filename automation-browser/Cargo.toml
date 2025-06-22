@@ -3,6 +3,22 @@ name = "automation-browser"
 version = "0.1.0"
 edition = "2021"
 
+[[example]]
+name = "openrouter_vision_demo"
+path = "examples/openrouter_vision_demo.rs"
+
+[[example]]
+name = "enhanced_google_search"
+path = "examples/enhanced_google_search.rs"
+
+[[example]]
+name = "computer_vision_demo"
+path = "examples/computer_vision_demo.rs"
+
+[[example]]
+name = "robust_google_search"
+path = "examples/robust_google_search.rs"
+
 [dependencies]
 automation-api = { path = "../automation-api" }
 anyhow = "1.0"

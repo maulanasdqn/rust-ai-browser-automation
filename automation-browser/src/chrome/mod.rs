@@ -3,7 +3,7 @@ use automation_api::BrowserAction;
 use base64::{engine::general_purpose, Engine as _};
 use regex;
 use reqwest;
-use serde_json::{json, Value};
+use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -35,6 +35,13 @@ pub enum AutomationMode {
     Hybrid, // Combination of both
 }
 
+#[derive(Debug, Clone)]
+pub enum VisionStrategy {
+    DomInspection,   // AI analyzes HTML to find selectors (cheaper, faster)
+    CoordinateBased, // AI analyzes screenshot to find coordinates (more robust)
+    Adaptive,        // Tries DOM first, falls back to coordinates
+}
+
 pub struct ChromeAutomationEngine {
     driver: Option<WebDriver>,
     headless: bool,
@@ -43,6 +50,7 @@ pub struct ChromeAutomationEngine {
     mode: AutomationMode,
     vision_api_key: Option<String>,
     vision_model: String,
+    vision_strategy: VisionStrategy,
 }
 
 impl ChromeAutomationEngine {
@@ -52,9 +60,10 @@ impl ChromeAutomationEngine {
             headless,
             logs: Arc::new(Mutex::new(Vec::new())),
             verbose: true,
-            mode: AutomationMode::Dom, // Default to DOM mode
+            mode: AutomationMode::Dom,
             vision_api_key: None,
-            vision_model: "anthropic/claude-3.5-sonnet".to_string(), // Claude has fewer safety restrictions
+            vision_model: "anthropic/claude-3-5-sonnet-20241022".to_string(), // Latest Claude 3.5 Sonnet
+            vision_strategy: VisionStrategy::Adaptive,
         }
     }
 
@@ -74,6 +83,55 @@ impl ChromeAutomationEngine {
             self.vision_model = m;
         }
         self
+    }
+
+    pub fn with_vision_strategy(mut self, strategy: VisionStrategy) -> Self {
+        self.vision_strategy = strategy;
+        self
+    }
+
+    pub fn set_vision_strategy(&mut self, strategy: VisionStrategy) {
+        self.vision_strategy = strategy;
+    }
+
+    // New method to set optimal model for specific strategy
+    pub fn with_optimal_model_for_strategy(&mut self, strategy: &VisionStrategy) {
+        match strategy {
+            VisionStrategy::DomInspection => {
+                // Claude 3.5 Sonnet is excellent for HTML analysis
+                self.vision_model = "anthropic/claude-3-5-sonnet-20241022".to_string();
+            }
+            VisionStrategy::CoordinateBased => {
+                // GPT-4o is superior for visual coordinate detection
+                self.vision_model = "openai/gpt-4o-2024-11-20".to_string();
+            }
+            VisionStrategy::Adaptive => {
+                // Claude 3.5 Sonnet is best for adaptive (DOM first, then coordinates)
+                self.vision_model = "anthropic/claude-3-5-sonnet-20241022".to_string();
+            }
+        }
+    }
+
+    // Enhanced model configuration with latest OpenRouter models
+    pub fn set_vision_model(&mut self, model: &str) {
+        self.vision_model = match model.to_lowercase().as_str() {
+            // Claude models (best for HTML analysis and general vision)
+            "claude" | "claude-3.5" | "claude-sonnet" => "anthropic/claude-3-5-sonnet-20241022",
+            "claude-haiku" => "anthropic/claude-3-5-haiku-20241022",
+
+            // OpenAI models (excellent for coordinate detection)
+            "gpt-4o" | "gpt4o" => "openai/gpt-4o-2024-11-20",
+            "gpt-4o-mini" | "gpt4o-mini" => "openai/gpt-4o-mini-2024-07-18",
+            "gpt-4" => "openai/gpt-4-turbo-2024-04-09",
+
+            // Google models (good alternative)
+            "gemini" | "gemini-pro" => "google/gemini-pro-1.5",
+            "gemini-flash" => "google/gemini-flash-1.5",
+
+            // Use exact model string if provided
+            _ => model,
+        }
+        .to_string();
     }
 
     pub async fn get_logs(&self) -> Vec<AutomationLog> {
@@ -119,6 +177,14 @@ impl ChromeAutomationEngine {
         caps.add_arg("--disable-dev-shm-usage")?;
         caps.add_arg("--disable-gpu")?;
         caps.add_arg("--window-size=1920,1080")?;
+
+        // Anti-detection measures for better compatibility with modern websites
+        caps.add_arg("--disable-blink-features=AutomationControlled")?;
+        caps.add_arg("--disable-extensions")?;
+        caps.add_arg("--disable-plugins")?;
+        caps.add_arg("--disable-web-security")?;
+        caps.add_arg("--disable-features=VizDisplayCompositor")?;
+        caps.add_arg("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36")?;
 
         let driver = WebDriver::new("http://localhost:9515", caps).await
             .map_err(|e| {
@@ -230,7 +296,7 @@ impl ChromeAutomationEngine {
                     for option in options {
                         let option_text = option.text().await.unwrap_or_default();
                         let option_value = option
-                            .get_attribute("value")
+                            .attr("value")
                             .await
                             .unwrap_or_default()
                             .unwrap_or_default();
@@ -386,8 +452,11 @@ impl ChromeAutomationEngine {
 
         self.log(
             "INFO",
-            "🧠 Using AI DOM Inspection to find precise selectors",
-            Some("ai_dom"),
+            &format!(
+                "🧠 Using AI Vision with {:?} strategy",
+                self.vision_strategy
+            ),
+            Some("vision"),
         )
         .await;
 
@@ -397,199 +466,50 @@ impl ChromeAutomationEngine {
 
         // Save debug screenshot
         let debug_timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-        let debug_filename = format!("debug_ai_dom_{}.png", debug_timestamp);
+        let debug_filename = format!("debug_vision_{}.png", debug_timestamp);
         std::fs::write(&debug_filename, &screenshot_data)?;
 
         self.log(
             "INFO",
             &format!("📸 Debug screenshot saved: {}", debug_filename),
-            Some("ai_dom"),
+            Some("vision"),
         )
         .await;
 
-        match action.action_type.as_str() {
-            "navigate" => {
-                if let Some(url) = &action.url {
-                    let clean_url = self.clean_url(url);
-                    self.log(
-                        "INFO",
-                        &format!("🌐 Navigating to: {}", clean_url),
-                        Some("navigate"),
-                    )
-                    .await;
-                    driver.goto(&clean_url).await?;
-                    tokio::time::sleep(Duration::from_millis(3000)).await;
-                    let result_msg = format!("Navigated to {}", clean_url);
-                    self.log("SUCCESS", &format!("✅ {}", result_msg), Some("navigate"))
-                        .await;
-                    Ok(result_msg)
-                } else {
-                    Err(anyhow::anyhow!("Navigate action requires URL"))
-                }
+        // Execute action based on vision strategy
+        match &self.vision_strategy {
+            VisionStrategy::DomInspection => {
+                self.execute_vision_action_dom_strategy(action, &screenshot_base64)
+                    .await
             }
-
-            "type" => {
-                if let Some(text) = &action.text {
-                    let element_description = action
-                        .element_description
-                        .as_deref()
-                        .unwrap_or("input field");
-
-                    self.log(
-                        "INFO",
-                        &format!(
-                            "🧠 AI DOM Inspection: Finding selector for '{}'",
-                            element_description
-                        ),
-                        Some("ai_dom"),
-                    )
-                    .await;
-
-                    // Get AI-generated selector
-                    let selector = self
-                        .get_ai_selector_for_element(
-                            &screenshot_base64,
-                            element_description,
-                            "input",
-                        )
-                        .await?;
-
-                    self.log(
-                        "INFO",
-                        &format!("🎯 AI found selector: {}", selector),
-                        Some("ai_dom"),
-                    )
-                    .await;
-
-                    // Use traditional DOM automation with AI-found selector
-                    let dom_action = BrowserAction {
-                        action_type: "type".to_string(),
-                        selector: Some(selector),
-                        element_description: None,
-                        text: Some(text.clone()),
-                        url: None,
-                        wait_condition: None,
-                        screenshot: false,
-                    };
-
-                    match self.execute_dom_action(&dom_action).await {
-                        Ok(result) => {
-                            self.log(
-                                "SUCCESS",
-                                &format!("✅ AI DOM typed '{}' successfully", text),
-                                Some("ai_dom"),
-                            )
-                            .await;
-                            Ok(result)
-                        }
-                        Err(e) => {
-                            self.log(
-                                "ERROR",
-                                &format!("❌ AI DOM typing failed: {}", e),
-                                Some("ai_dom"),
-                            )
-                            .await;
-                            Err(e)
-                        }
-                    }
-                } else {
-                    Err(anyhow::anyhow!("Type action requires text"))
-                }
+            VisionStrategy::CoordinateBased => {
+                self.execute_vision_action_with_coordinates(action).await
             }
-
-            "click" => {
-                let element_description = action
-                    .element_description
-                    .as_deref()
-                    .unwrap_or("clickable element");
-
-                self.log(
-                    "INFO",
-                    &format!(
-                        "🧠 AI DOM Inspection: Finding selector for '{}'",
-                        element_description
-                    ),
-                    Some("ai_dom"),
-                )
-                .await;
-
-                // Get AI-generated selector
-                let selector = self
-                    .get_ai_selector_for_element(&screenshot_base64, element_description, "button")
-                    .await?;
-
-                self.log(
-                    "INFO",
-                    &format!("🎯 AI found selector: {}", selector),
-                    Some("ai_dom"),
-                )
-                .await;
-
-                // Use traditional DOM automation with AI-found selector
-                let dom_action = BrowserAction {
-                    action_type: "click".to_string(),
-                    selector: Some(selector),
-                    element_description: None,
-                    text: None,
-                    url: None,
-                    wait_condition: None,
-                    screenshot: false,
-                };
-
-                match self.execute_dom_action(&dom_action).await {
+            VisionStrategy::Adaptive => {
+                // Try DOM inspection first, fall back to coordinates
+                match self
+                    .execute_vision_action_dom_strategy(action, &screenshot_base64)
+                    .await
+                {
                     Ok(result) => {
-                        self.log("SUCCESS", "✅ AI DOM click successful", Some("ai_dom"))
-                            .await;
+                        self.log(
+                            "SUCCESS",
+                            "✅ DOM inspection strategy succeeded",
+                            Some("vision"),
+                        )
+                        .await;
                         Ok(result)
                     }
                     Err(e) => {
                         self.log(
-                            "ERROR",
-                            &format!("❌ AI DOM click failed: {}", e),
-                            Some("ai_dom"),
+                            "WARN",
+                            &format!("⚠️ DOM inspection failed: {}, trying coordinates", e),
+                            Some("vision"),
                         )
                         .await;
-                        Err(e)
+                        self.execute_vision_action_with_coordinates(action).await
                     }
                 }
-            }
-
-            "wait" => {
-                // Wait actions don't need AI inspection - use DOM implementation
-                self.log(
-                    "INFO",
-                    "⏱️ AI DOM mode: Using standard wait implementation",
-                    Some("ai_dom"),
-                )
-                .await;
-                self.execute_dom_action(action).await
-            }
-
-            "screenshot" => {
-                self.log(
-                    "INFO",
-                    "📸 Taking AI DOM enhanced screenshot",
-                    Some("screenshot"),
-                )
-                .await;
-                let screenshot_data = driver.screenshot_as_png().await?;
-                let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-                let filename = format!("ai_dom_screenshot_{}.png", timestamp);
-                std::fs::write(&filename, screenshot_data)?;
-                let result_msg = format!("AI DOM screenshot saved as {}", filename);
-                self.log("SUCCESS", &format!("✅ {}", result_msg), Some("screenshot"))
-                    .await;
-                Ok(result_msg)
-            }
-
-            _ => {
-                let error_msg = format!(
-                    "Unsupported action type for AI DOM mode: {}",
-                    action.action_type
-                );
-                self.log("ERROR", &format!("❌ {}", error_msg), Some("ai_dom"))
-                    .await;
-                Err(anyhow::anyhow!(error_msg))
             }
         }
     }
@@ -619,260 +539,6 @@ impl ChromeAutomationEngine {
                 self.execute_vision_action(action).await
             }
         }
-    }
-
-    async fn get_element_coordinates_via_vision(
-        &self,
-        screenshot_base64: &str,
-        prompt: &str,
-    ) -> Result<(i32, i32)> {
-        if let Some(api_key) = &self.vision_api_key {
-            self.log(
-                "INFO",
-                "🧠 Analyzing screenshot with AI Vision",
-                Some("vision"),
-            )
-            .await;
-
-            // Make API call to vision model (OpenAI GPT-4V, Claude Vision, etc.)
-            let coordinates = self
-                .call_vision_api(api_key, screenshot_base64, prompt)
-                .await?;
-
-            self.log(
-                "SUCCESS",
-                &format!(
-                    "✅ AI Vision found coordinates: ({}, {})",
-                    coordinates.0, coordinates.1
-                ),
-                Some("vision"),
-            )
-            .await;
-            Ok(coordinates)
-        } else {
-            Err(anyhow::anyhow!("Vision API key not configured"))
-        }
-    }
-
-    async fn call_vision_api(
-        &self,
-        api_key: &str,
-        screenshot_base64: &str,
-        prompt: &str,
-    ) -> Result<(i32, i32)> {
-        self.log(
-            "INFO",
-            &format!(
-                "🤖 Calling OpenRouter {} for vision analysis",
-                self.vision_model
-            ),
-            Some("vision"),
-        )
-        .await;
-
-        let client = reqwest::Client::new();
-
-        // Create the OpenRouter API payload
-        let payload = json!({
-            "model": self.vision_model,
-            "messages": [{
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": format!("{}\n\nIMPORTANT: You must respond with ONLY the coordinates in 'x,y' format (e.g., '450,320'). Do not include any other text, explanations, or formatting.", prompt)
-                    },
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": format!("data:image/png;base64,{}", screenshot_base64)
-                        }
-                    }
-                ]
-            }],
-            "max_tokens": 50,
-            "temperature": 0.1
-        });
-
-        self.log(
-            "INFO",
-            "📡 Sending screenshot to OpenRouter Vision API...",
-            Some("vision"),
-        )
-        .await;
-
-        // Make the API call to OpenRouter
-        let response = client
-            .post("https://openrouter.ai/api/v1/chat/completions")
-            .header("Authorization", format!("Bearer {}", api_key))
-            .header("Content-Type", "application/json")
-            .header("HTTP-Referer", "https://ai-ac-automation.local") // Optional: for OpenRouter analytics
-            .header("X-Title", "AI Browser Automation") // Optional: for OpenRouter analytics
-            .json(&payload)
-            .send()
-            .await
-            .map_err(|e| anyhow::anyhow!("OpenRouter API request failed: {}", e))?;
-
-        let status = response.status();
-        if !status.is_success() {
-            let error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Unknown error".to_string());
-            self.log(
-                "ERROR",
-                &format!("❌ OpenRouter API error: {} - {}", status, error_text),
-                Some("vision"),
-            )
-            .await;
-            return Err(anyhow::anyhow!(
-                "OpenRouter API returned error: {}",
-                error_text
-            ));
-        }
-
-        let response_json: Value = response
-            .json()
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to parse OpenRouter response: {}", e))?;
-
-        // Extract the coordinates from the response
-        let content = response_json
-            .get("choices")
-            .and_then(|choices| choices.get(0))
-            .and_then(|choice| choice.get("message"))
-            .and_then(|message| message.get("content"))
-            .and_then(|content| content.as_str())
-            .unwrap_or("");
-
-        self.log(
-            "INFO",
-            &format!("🧠 OpenRouter Vision response: '{}'", content.trim()),
-            Some("vision"),
-        )
-        .await;
-
-        // Parse coordinates from the response
-        let coordinates = self.parse_coordinates_from_response(content).await?;
-
-        self.log(
-            "SUCCESS",
-            &format!(
-                "✅ OpenRouter Vision found coordinates: ({}, {})",
-                coordinates.0, coordinates.1
-            ),
-            Some("vision"),
-        )
-        .await;
-
-        Ok(coordinates)
-    }
-
-    async fn parse_coordinates_from_response(&self, response: &str) -> Result<(i32, i32)> {
-        let cleaned = response.trim();
-
-        self.log(
-            "INFO",
-            &format!("🔍 Parsing coordinates from AI response: '{}'", cleaned),
-            Some("vision"),
-        )
-        .await;
-
-        // Try different coordinate formats
-        let patterns = vec![
-            // Standard x,y format
-            r"(\d+),\s*(\d+)",
-            // Parentheses format
-            r"\((\d+),\s*(\d+)\)",
-            // Bracket format
-            r"\[(\d+),\s*(\d+)\]",
-            // x: y: format
-            r"x:\s*(\d+).*?y:\s*(\d+)",
-            // More flexible format
-            r"(\d+)\s*,\s*(\d+)",
-        ];
-
-        for pattern in patterns {
-            if let Ok(regex) = regex::Regex::new(pattern) {
-                if let Some(captures) = regex.captures(cleaned) {
-                    if let (Some(x_match), Some(y_match)) = (captures.get(1), captures.get(2)) {
-                        if let (Ok(x), Ok(y)) = (
-                            x_match.as_str().parse::<i32>(),
-                            y_match.as_str().parse::<i32>(),
-                        ) {
-                            // Validate coordinates are within reasonable screen bounds
-                            if x >= 0 && x <= 3840 && y >= 0 && y <= 2160 {
-                                self.log(
-                                    "SUCCESS",
-                                    &format!(
-                                        "✅ Parsed coordinates using pattern '{}': ({}, {})",
-                                        pattern, x, y
-                                    ),
-                                    Some("vision"),
-                                )
-                                .await;
-                                return Ok((x, y));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // If no valid coordinates found, try to extract first two numbers
-        let numbers: Vec<i32> = cleaned
-            .split(|c: char| !c.is_ascii_digit())
-            .filter_map(|s| s.parse().ok())
-            .collect();
-
-        if numbers.len() >= 2 {
-            let x = numbers[0];
-            let y = numbers[1];
-            if x >= 0 && x <= 3840 && y >= 0 && y <= 2160 {
-                self.log(
-                    "WARN",
-                    &format!("⚠️ Fallback coordinate parsing: ({}, {})", x, y),
-                    Some("vision"),
-                )
-                .await;
-                return Ok((x, y));
-            }
-        }
-
-        // CRITICAL: Don't fall back to center - return error instead
-        self.log(
-            "ERROR",
-            &format!(
-                "❌ VISION FAILED: Could not parse valid coordinates from: '{}'. This action will be skipped to prevent random clicking.",
-                cleaned
-            ),
-            Some("vision"),
-        )
-        .await;
-
-        Err(anyhow::anyhow!(
-            "Vision AI failed to provide valid coordinates. Response was: '{}'",
-            cleaned
-        ))
-    }
-
-    async fn click_at_coordinates(&self, driver: &WebDriver, x: i32, y: i32) -> Result<()> {
-        self.log(
-            "INFO",
-            &format!("🖱️ Clicking at coordinates ({}, {})", x, y),
-            Some("vision"),
-        )
-        .await;
-
-        driver
-            .action_chain()
-            .move_to(x as i64, y as i64)
-            .click()
-            .perform()
-            .await?;
-
-        tokio::time::sleep(Duration::from_millis(1000)).await;
-        Ok(())
     }
 
     async fn find_element_with_retry(
@@ -978,13 +644,78 @@ impl ChromeAutomationEngine {
         let start_time = std::time::Instant::now();
         let timeout = Duration::from_secs(timeout_seconds);
 
+        self.log(
+            "INFO",
+            &format!(
+                "🔍 Waiting for element '{}' to become visible ({}s timeout)",
+                selector, timeout_seconds
+            ),
+            Some("wait"),
+        )
+        .await;
+
         while start_time.elapsed() < timeout {
+            // Check for common blocking elements first (Google consent, cookies, etc.)
+            self.handle_common_blocking_elements(driver).await?;
+
             if let Ok(element) = self.try_find_element(driver, selector).await {
                 if element.is_displayed().await.unwrap_or(false) {
+                    self.log(
+                        "SUCCESS",
+                        &format!("✅ Element '{}' is now visible", selector),
+                        Some("wait"),
+                    )
+                    .await;
                     return Ok(());
                 }
             }
+
+            // Log progress every few seconds
+            let elapsed = start_time.elapsed().as_secs();
+            if elapsed % 3 == 0 && elapsed > 0 {
+                self.log(
+                    "INFO",
+                    &format!("⏳ Still waiting for '{}' ({}s elapsed)", selector, elapsed),
+                    Some("wait"),
+                )
+                .await;
+            }
+
             tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+
+        // Before failing, try alternative selectors for Google search
+        if selector.contains("input[name=\"q\"]") {
+            self.log(
+                "WARN",
+                "🔄 Trying alternative Google search selectors",
+                Some("wait"),
+            )
+            .await;
+
+            let alternative_selectors = vec![
+                "input[title=\"Search\"]",
+                "input[aria-label*=\"Search\"]",
+                "input[placeholder*=\"Search\"]",
+                "textarea[name=\"q\"]",
+                "#searchbox input",
+                ".gLFyf", // Google's search input class
+                "input[type=\"text\"]",
+            ];
+
+            for alt_selector in alternative_selectors {
+                if let Ok(element) = self.try_find_element(driver, alt_selector).await {
+                    if element.is_displayed().await.unwrap_or(false) {
+                        self.log(
+                            "SUCCESS",
+                            &format!("✅ Found alternative selector: '{}'", alt_selector),
+                            Some("wait"),
+                        )
+                        .await;
+                        return Ok(());
+                    }
+                }
+            }
         }
 
         Err(anyhow::anyhow!(
@@ -992,6 +723,49 @@ impl ChromeAutomationEngine {
             selector,
             timeout_seconds
         ))
+    }
+
+    // Handle common blocking elements that prevent main content from being visible
+    async fn handle_common_blocking_elements(&self, driver: &WebDriver) -> Result<()> {
+        // List of common blocking elements to dismiss
+        let blocking_selectors = vec![
+            // Google cookie consent
+            "button[id*='accept']",
+            "button[aria-label*='Accept']",
+            "button:contains('Accept all')",
+            "button:contains('I agree')",
+            "#L2AGLb", // Google's "Accept all" button
+            // Generic cookie banners
+            "button[id*='cookie']",
+            "button[class*='cookie']",
+            "*[id*='consent'] button",
+            // Modal dialogs
+            "button[aria-label*='Close']",
+            "button.close",
+            ".modal button",
+            // Overlay dismissal
+            "[role='dialog'] button",
+            ".overlay button",
+        ];
+
+        for selector in blocking_selectors {
+            if let Ok(element) = self.try_find_element(driver, selector).await {
+                if element.is_displayed().await.unwrap_or(false) {
+                    self.log(
+                        "INFO",
+                        &format!("🔲 Dismissing blocking element: {}", selector),
+                        Some("blocking"),
+                    )
+                    .await;
+
+                    let _ = element.click().await; // Don't fail if click doesn't work
+                    tokio::time::sleep(Duration::from_millis(1000)).await;
+                    break; // Only dismiss one at a time
+                }
+            }
+        }
+
+        Ok(())
     }
 
     pub async fn take_screenshot(&mut self, filename: Option<&str>) -> Result<String> {
@@ -1130,7 +904,56 @@ impl ChromeAutomationEngine {
             }
             "url_contains" => {
                 let current_url = driver.current_url().await?.to_string();
-                if current_url.contains(assertion_value) {
+
+                // Special handling for Google search which may not change URL
+                if assertion_value == "search" && current_url.contains("google.com") {
+                    self.log(
+                        "INFO", 
+                        "🔍 Detected Google search verification, checking for search results instead of URL change",
+                        Some("assertion"),
+                    )
+                    .await;
+
+                    // Check for search results elements instead of URL
+                    let page_source = driver.source().await?;
+                    let has_search_results = page_source.contains("search-results") 
+                        || page_source.contains("result-stats")
+                        || page_source.contains("search_results")
+                        || page_source.contains("g-blk")
+                        || page_source.contains("srg")
+                        || page_source.contains("ULSxyf")  // Google results container
+                        || page_source.contains("VjDLd"); // Google results area
+
+                    if has_search_results {
+                        self.log(
+                            "INFO",
+                            "✅ Google search results detected on page",
+                            Some("assertion"),
+                        )
+                        .await;
+                        Ok(())
+                    } else {
+                        // Wait a bit more for results to load
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                        let page_source = driver.source().await?;
+                        let has_search_results = page_source.contains("search-results")
+                            || page_source.contains("result-stats")
+                            || page_source.contains("search_results")
+                            || page_source.contains("g-blk")
+                            || page_source.contains("srg")
+                            || page_source.contains("ULSxyf")
+                            || page_source.contains("VjDLd");
+
+                        if has_search_results {
+                            Ok(())
+                        } else {
+                            Err(anyhow::anyhow!(
+                                "Google search results not found. URL: '{}'. Page may still be loading or search failed.",
+                                current_url
+                            ))
+                        }
+                    }
+                } else if current_url.contains(assertion_value) {
                     Ok(())
                 } else {
                     Err(anyhow::anyhow!(
@@ -1161,6 +984,74 @@ impl ChromeAutomationEngine {
                         title,
                         assertion_value
                     ))
+                }
+            }
+            "search_results_visible" => {
+                self.log(
+                    "INFO",
+                    "🔍 Checking for search results visibility",
+                    Some("assertion"),
+                )
+                .await;
+
+                let page_source = driver.source().await?;
+                let current_url = driver.current_url().await?.to_string();
+
+                let has_search_results = if current_url.contains("google.com") {
+                    // Google-specific search result indicators
+                    page_source.contains("search-results") 
+                        || page_source.contains("result-stats")
+                        || page_source.contains("search_results")
+                        || page_source.contains("g-blk")
+                        || page_source.contains("srg")
+                        || page_source.contains("ULSxyf")  // Google results container
+                        || page_source.contains("VjDLd")   // Google results area
+                        || page_source.contains("tF2Cxc") // Individual result containers
+                } else {
+                    // Generic search result indicators
+                    page_source.contains("search-result")
+                        || page_source.contains("result")
+                        || page_source.contains("search_result")
+                        || page_source.contains("results")
+                };
+
+                if has_search_results {
+                    self.log(
+                        "SUCCESS",
+                        "✅ Search results are visible on the page",
+                        Some("assertion"),
+                    )
+                    .await;
+                    Ok(())
+                } else {
+                    // Wait a bit for dynamic content to load
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    let page_source = driver.source().await?;
+
+                    let has_search_results = if current_url.contains("google.com") {
+                        page_source.contains("search-results")
+                            || page_source.contains("result-stats")
+                            || page_source.contains("search_results")
+                            || page_source.contains("g-blk")
+                            || page_source.contains("srg")
+                            || page_source.contains("ULSxyf")
+                            || page_source.contains("VjDLd")
+                            || page_source.contains("tF2Cxc")
+                    } else {
+                        page_source.contains("search-result")
+                            || page_source.contains("result")
+                            || page_source.contains("search_result")
+                            || page_source.contains("results")
+                    };
+
+                    if has_search_results {
+                        Ok(())
+                    } else {
+                        Err(anyhow::anyhow!(
+                            "Search results are not visible. Current URL: {}",
+                            current_url
+                        ))
+                    }
                 }
             }
             _ => Err(anyhow::anyhow!(
@@ -1232,7 +1123,7 @@ impl ChromeAutomationEngine {
 
     async fn get_ai_selector_for_element(
         &self,
-        screenshot_base64: &str,
+        _screenshot_base64: &str,
         element_description: &str,
         element_type: &str,
     ) -> Result<String> {
@@ -1265,63 +1156,90 @@ impl ChromeAutomationEngine {
 
         let vision_model = &self.vision_model;
 
-        let prompt = format!(
-            r#"You are a CSS selector generator. Analyze this HTML and return ONLY a valid CSS selector for: {}
+        // Enhanced HTML analysis prompt based on model type
+        let (system_prompt, user_prompt) = if self.vision_model.contains("claude") {
+            // Claude-optimized prompts for HTML analysis
+            (
+                Some("You are an expert web developer specializing in CSS selector analysis. Your task is to analyze HTML and return the most reliable CSS selector for the described element. Always prioritize specificity and reliability."),
+                format!(
+                    "Analyze this HTML and find the best CSS selector for: '{}'\n\n\
+                    Requirements:\n\
+                    - Return ONLY the CSS selector (no explanations)\n\
+                    - Prefer ID selectors when available (#id)\n\
+                    - Use class selectors for reliability (.class)\n\
+                    - Avoid overly complex selectors\n\
+                    - Ensure selector is unique and stable\n\n\
+                    HTML source:\n{}", 
+                    element_description, truncated_html
+                )
+            )
+        } else if self.vision_model.contains("gpt") {
+            // GPT-optimized prompts
+            (
+                Some("Expert CSS selector analyzer. Return only the most reliable CSS selector for the described element."),
+                format!(
+                    "Find CSS selector for: '{}'\n\
+                    Rules: Return only CSS selector, no text. Prefer #id, then .class, then tag[attr].\n\n\
+                    HTML:\n{}", 
+                    element_description, truncated_html
+                )
+            )
+        } else {
+            // Generic prompts
+            (
+                None,
+                format!(
+                    r#"Find CSS selector for '{}' in this HTML. Return only the selector.\n\nHTML:\n{}\n\nSelector:"#,
+                    element_description, truncated_html
+                ),
+            )
+        };
 
-HTML snippet:
-{}
+        let mut messages = Vec::new();
 
-CRITICAL RULES:
-1. Return ONLY a CSS selector - NO explanations, NO text, NO markdown
-2. If you cannot find the element, return one of these fallback selectors:
-   - For login buttons: button[type="submit"]
-   - For email inputs: input[type="email"] 
-   - For password inputs: input[type="password"]
-   - For dashboard elements: .dashboard, #dashboard, .main-content, .content
-   - For general elements: div, span, *
+        if let Some(system) = system_prompt {
+            messages.push(json!({
+                "role": "system",
+                "content": system
+            }));
+        }
 
-Examples of VALID responses:
-input[type="email"]
-button[type="submit"]
-.dashboard
-#main-content
+        messages.push(json!({
+            "role": "user",
+            "content": user_prompt
+        }));
 
-Examples of INVALID responses (DO NOT DO THIS):
-"I cannot find the element"
-"Based on the HTML provided..."
-```css
-selector
-```
-
-Return only the selector:"#,
-            element_description, truncated_html
-        );
-
-        let payload = json!({
+        let mut payload = json!({
             "model": vision_model,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ],
-            "max_tokens": 100,
+            "messages": messages,
+            "max_tokens": 150,
             "temperature": 0.1
         });
+
+        // Model-specific optimizations for HTML analysis
+        if self.vision_model.contains("claude") {
+            payload["max_tokens"] = json!(200);
+            payload["temperature"] = json!(0.0);
+        } else if self.vision_model.contains("gpt") {
+            payload["max_tokens"] = json!(100);
+            payload["temperature"] = json!(0.1);
+        }
 
         let client = reqwest::Client::new();
         let response = client
             .post("https://openrouter.ai/api/v1/chat/completions")
             .header("Authorization", format!("Bearer {}", vision_api_key))
             .header("Content-Type", "application/json")
-            .header("HTTP-Referer", "https://ac-automation.local")
-            .header("X-Title", "AC Automation HTML Analysis")
+            .header("HTTP-Referer", "https://ai-browser-automation.local")
+            .header("X-Title", "AI Browser Automation HTML Analysis")
+            .header("User-Agent", "AI-Browser-Automation/1.0")
+            .timeout(std::time::Duration::from_secs(20))
             .json(&payload)
             .send()
             .await?;
 
         if !response.status().is_success() {
-            let error_text = response
+            let _error_text = response
                 .text()
                 .await
                 .unwrap_or_else(|_| "Unknown error".to_string());
@@ -1395,9 +1313,16 @@ Return only the selector:"#,
             "input[type=\"password\"]".to_string()
         } else if desc.contains("login") || desc.contains("submit") || desc.contains("sign in") {
             "button[type=\"submit\"]".to_string()
-        } else if element_type == "input" {
-            "input".to_string()
-        } else if element_type == "button" {
+        } else if desc.contains("search") {
+            // Google search specific fallbacks with modern selectors
+            if desc.contains("google") {
+                "textarea[name=\"q\"]".to_string() // Google's current search input (changed from input to textarea)
+            } else {
+                "input[name=\"q\"]".to_string()
+            }
+        } else if desc.contains("input") || element_type == "input" {
+            "input[type=\"text\"]".to_string()
+        } else if desc.contains("button") || element_type == "button" {
             "button".to_string()
         } else {
             "*".to_string()
@@ -1426,6 +1351,711 @@ Return only the selector:"#,
         }
 
         cleaned_selector
+    }
+
+    // Computer Vision Implementation
+    async fn get_element_coordinates_via_vision(
+        &self,
+        screenshot_base64: &str,
+        prompt: &str,
+    ) -> Result<(i32, i32)> {
+        if let Some(api_key) = &self.vision_api_key {
+            self.log(
+                "INFO",
+                "🧠 Analyzing screenshot with AI Vision for coordinates",
+                Some("vision"),
+            )
+            .await;
+
+            let coordinates = self
+                .call_vision_api_for_coordinates(api_key, screenshot_base64, prompt)
+                .await?;
+
+            self.log(
+                "SUCCESS",
+                &format!(
+                    "✅ AI Vision found coordinates: ({}, {})",
+                    coordinates.0, coordinates.1
+                ),
+                Some("vision"),
+            )
+            .await;
+            Ok(coordinates)
+        } else {
+            Err(anyhow::anyhow!("Vision API key not configured"))
+        }
+    }
+
+    async fn call_vision_api_for_coordinates(
+        &self,
+        api_key: &str,
+        screenshot_base64: &str,
+        prompt: &str,
+    ) -> Result<(i32, i32)> {
+        self.log(
+            "INFO",
+            &format!(
+                "🤖 Calling OpenRouter {} for coordinate analysis",
+                self.vision_model
+            ),
+            Some("vision"),
+        )
+        .await;
+
+        let client = reqwest::Client::new();
+
+        // Enhanced prompt based on model type
+        let enhanced_prompt = if self.vision_model.contains("claude") {
+            // Claude-optimized prompt
+            format!(
+                "{}\n\nYou are an expert at analyzing web page screenshots. Your task:\n\
+                1. Locate the described element in the screenshot\n\
+                2. Determine the center coordinates where a user should click\n\
+                3. Return ONLY the coordinates in format: x,y\n\
+                4. Example: 450,320\n\
+                5. If not found, respond: NOT_FOUND\n\
+                6. Be precise - users rely on accurate coordinates",
+                prompt
+            )
+        } else if self.vision_model.contains("gpt") {
+            // GPT-optimized prompt
+            format!(
+                "{}\n\nTask: Find element coordinates for clicking\n\
+                Instructions:\n\
+                - Analyze the screenshot carefully\n\
+                - Locate the described element\n\
+                - Return center click coordinates as: x,y\n\
+                - Format example: 450,320\n\
+                - If element not visible: NOT_FOUND\n\
+                - Be accurate - this controls browser automation",
+                prompt
+            )
+        } else {
+            // Generic prompt for other models
+            format!(
+                "{}\n\nFind the element and return click coordinates as x,y format (example: 450,320). If not found, return NOT_FOUND.",
+                prompt
+            )
+        };
+
+        // Optimized payload based on model
+        let mut payload = json!({
+            "model": self.vision_model,
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": enhanced_prompt
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": format!("data:image/png;base64,{}", screenshot_base64)
+                        }
+                    }
+                ]
+            }],
+            "max_tokens": 100,
+            "temperature": 0.1
+        });
+
+        // Model-specific optimizations
+        if self.vision_model.contains("claude") {
+            payload["max_tokens"] = json!(150);
+            payload["temperature"] = json!(0.0);
+        } else if self.vision_model.contains("gpt-4o") {
+            payload["max_tokens"] = json!(50);
+            payload["temperature"] = json!(0.1);
+        }
+
+        self.log(
+            "INFO",
+            "📡 Sending screenshot to OpenRouter Vision API...",
+            Some("vision"),
+        )
+        .await;
+
+        let response = client
+            .post("https://openrouter.ai/api/v1/chat/completions")
+            .header("Authorization", format!("Bearer {}", api_key))
+            .header("Content-Type", "application/json")
+            .header("HTTP-Referer", "https://ai-browser-automation.local")
+            .header("X-Title", "AI Browser Automation Vision")
+            .header("User-Agent", "AI-Browser-Automation/1.0")
+            .timeout(std::time::Duration::from_secs(30))
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("OpenRouter API request failed: {}", e))?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
+
+            // Enhanced error reporting for common OpenRouter issues
+            let error_msg = if status == 401 {
+                "OpenRouter API key invalid or expired. Check your OPENROUTER_API_KEY."
+            } else if status == 429 {
+                "OpenRouter rate limit exceeded. Please wait and try again."
+            } else if status == 402 {
+                "OpenRouter account has insufficient credits. Please add credits to your account."
+            } else {
+                "OpenRouter API error occurred"
+            };
+
+            self.log(
+                "ERROR",
+                &format!("❌ {}: {} - {}", error_msg, status, error_text),
+                Some("vision"),
+            )
+            .await;
+            return Err(anyhow::anyhow!("{}: {}", error_msg, error_text));
+        }
+
+        let response_json: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to parse OpenRouter response: {}", e))?;
+
+        let content = response_json
+            .get("choices")
+            .and_then(|choices| choices.get(0))
+            .and_then(|choice| choice.get("message"))
+            .and_then(|message| message.get("content"))
+            .and_then(|content| content.as_str())
+            .unwrap_or("");
+
+        self.log(
+            "SUCCESS",
+            &format!("🧠 OpenRouter response: '{}'", content.trim()),
+            Some("vision"),
+        )
+        .await;
+
+        self.parse_coordinates_from_response(content).await
+    }
+
+    async fn parse_coordinates_from_response(&self, response: &str) -> Result<(i32, i32)> {
+        let cleaned = response.trim();
+
+        self.log(
+            "INFO",
+            &format!("🔍 Parsing coordinates from AI response: '{}'", cleaned),
+            Some("vision"),
+        )
+        .await;
+
+        // Check for NOT_FOUND response
+        if cleaned.to_uppercase().contains("NOT_FOUND") {
+            return Err(anyhow::anyhow!("AI Vision could not find the element"));
+        }
+
+        // Try different coordinate formats
+        let patterns = vec![
+            r"(\d+),\s*(\d+)",               // Standard x,y format
+            r"\((\d+),\s*(\d+)\)",           // Parentheses format
+            r"\[(\d+),\s*(\d+)\]",           // Bracket format
+            r"x:\s*(\d+).*?y:\s*(\d+)",      // x: y: format
+            r"(\d+)\s*,\s*(\d+)",            // Flexible format
+            r"click.*?(\d+),\s*(\d+)",       // "click at 450,320"
+            r"coordinates.*?(\d+),\s*(\d+)", // "coordinates: 450,320"
+        ];
+
+        for pattern in patterns {
+            if let Ok(regex) = regex::Regex::new(pattern) {
+                if let Some(captures) = regex.captures(cleaned) {
+                    if let (Some(x_match), Some(y_match)) = (captures.get(1), captures.get(2)) {
+                        if let (Ok(x), Ok(y)) = (
+                            x_match.as_str().parse::<i32>(),
+                            y_match.as_str().parse::<i32>(),
+                        ) {
+                            // Validate coordinates are within reasonable screen bounds
+                            if x >= 0 && x <= 3840 && y >= 0 && y <= 2160 {
+                                self.log(
+                                    "SUCCESS",
+                                    &format!(
+                                        "✅ Parsed coordinates using pattern '{}': ({}, {})",
+                                        pattern, x, y
+                                    ),
+                                    Some("vision"),
+                                )
+                                .await;
+                                return Ok((x, y));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fallback: extract first two numbers
+        let numbers: Vec<i32> = cleaned
+            .split(|c: char| !c.is_ascii_digit())
+            .filter_map(|s| s.parse().ok())
+            .collect();
+
+        if numbers.len() >= 2 {
+            let x = numbers[0];
+            let y = numbers[1];
+            if x >= 0 && x <= 3840 && y >= 0 && y <= 2160 {
+                self.log(
+                    "WARN",
+                    &format!("⚠️ Fallback coordinate parsing: ({}, {})", x, y),
+                    Some("vision"),
+                )
+                .await;
+                return Ok((x, y));
+            }
+        }
+
+        self.log(
+            "ERROR",
+            &format!(
+                "❌ Could not parse valid coordinates from: '{}'. Coordinate-based vision failed.",
+                cleaned
+            ),
+            Some("vision"),
+        )
+        .await;
+
+        Err(anyhow::anyhow!(
+            "Vision AI failed to provide valid coordinates. Response: '{}'",
+            cleaned
+        ))
+    }
+
+    async fn click_at_coordinates(&self, driver: &WebDriver, x: i32, y: i32) -> Result<()> {
+        self.log(
+            "INFO",
+            &format!("🖱️ Clicking at coordinates ({}, {})", x, y),
+            Some("vision"),
+        )
+        .await;
+
+        // Move to coordinates and click
+        driver
+            .action_chain()
+            .move_to(x as i64, y as i64)
+            .click()
+            .perform()
+            .await?;
+
+        // Brief pause after click
+        tokio::time::sleep(Duration::from_millis(1000)).await;
+
+        self.log(
+            "SUCCESS",
+            &format!("✅ Successfully clicked at ({}, {})", x, y),
+            Some("vision"),
+        )
+        .await;
+
+        Ok(())
+    }
+
+    // Enhanced Vision Action with fallback to coordinates
+    async fn execute_vision_action_with_coordinates(
+        &mut self,
+        action: &BrowserAction,
+    ) -> Result<String> {
+        let driver = self
+            .driver
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("WebDriver not initialized"))?;
+
+        // Take screenshot for AI analysis
+        let screenshot_data = driver.screenshot_as_png().await?;
+        let screenshot_base64 = general_purpose::STANDARD.encode(&screenshot_data);
+
+        // Save debug screenshot
+        let debug_timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+        let debug_filename = format!("debug_vision_{}.png", debug_timestamp);
+        std::fs::write(&debug_filename, &screenshot_data)?;
+
+        self.log(
+            "INFO",
+            &format!("📸 Debug screenshot saved: {}", debug_filename),
+            Some("vision"),
+        )
+        .await;
+
+        match action.action_type.as_str() {
+            "click" => {
+                let element_description = action
+                    .element_description
+                    .as_deref()
+                    .unwrap_or("clickable element");
+
+                self.log(
+                    "INFO",
+                    &format!("🎯 Vision click: Finding '{}'", element_description),
+                    Some("vision"),
+                )
+                .await;
+
+                let prompt = format!(
+                    "I need to click on '{}'. Please analyze this screenshot and tell me the exact pixel coordinates where I should click.",
+                    element_description
+                );
+
+                // Try to get coordinates via vision
+                match self
+                    .get_element_coordinates_via_vision(&screenshot_base64, &prompt)
+                    .await
+                {
+                    Ok((x, y)) => {
+                        self.click_at_coordinates(driver, x, y).await?;
+                        Ok(format!(
+                            "Successfully clicked '{}' at coordinates ({}, {})",
+                            element_description, x, y
+                        ))
+                    }
+                    Err(e) => {
+                        self.log(
+                            "WARN",
+                            &format!("⚠️ Coordinate-based vision failed: {}", e),
+                            Some("vision"),
+                        )
+                        .await;
+
+                        // Fallback to AI DOM selector finding
+                        self.log(
+                            "INFO",
+                            "🔄 Falling back to AI DOM selector analysis",
+                            Some("vision"),
+                        )
+                        .await;
+
+                        let selector = self
+                            .get_ai_selector_for_element(
+                                &screenshot_base64,
+                                element_description,
+                                "button",
+                            )
+                            .await?;
+
+                        let dom_action = BrowserAction {
+                            action_type: "click".to_string(),
+                            selector: Some(selector),
+                            element_description: None,
+                            text: None,
+                            url: None,
+                            wait_condition: None,
+                            screenshot: false,
+                        };
+
+                        self.execute_dom_action(&dom_action).await
+                    }
+                }
+            }
+
+            "type" => {
+                if let Some(text) = &action.text {
+                    let element_description = action
+                        .element_description
+                        .as_deref()
+                        .unwrap_or("input field");
+
+                    self.log(
+                        "INFO",
+                        &format!(
+                            "⌨️ Vision type: Finding '{}' to type '{}'",
+                            element_description, text
+                        ),
+                        Some("vision"),
+                    )
+                    .await;
+
+                    let prompt = format!(
+                        "I need to type text into '{}'. Please analyze this screenshot and tell me the exact pixel coordinates of the input field where I should click first.",
+                        element_description
+                    );
+
+                    // Try coordinate-based approach first
+                    match self
+                        .get_element_coordinates_via_vision(&screenshot_base64, &prompt)
+                        .await
+                    {
+                        Ok((x, y)) => {
+                            // Click on the input field first
+                            self.click_at_coordinates(driver, x, y).await?;
+
+                            // Wait for focus
+                            tokio::time::sleep(Duration::from_millis(500)).await;
+
+                            // Type the text
+                            driver.action_chain().send_keys(text).perform().await?;
+
+                            Ok(format!(
+                                "Successfully typed '{}' into '{}' at coordinates ({}, {})",
+                                text, element_description, x, y
+                            ))
+                        }
+                        Err(e) => {
+                            self.log(
+                                "WARN",
+                                &format!("⚠️ Coordinate-based typing failed: {}", e),
+                                Some("vision"),
+                            )
+                            .await;
+
+                            // Fallback to AI DOM selector
+                            let selector = self
+                                .get_ai_selector_for_element(
+                                    &screenshot_base64,
+                                    element_description,
+                                    "input",
+                                )
+                                .await?;
+
+                            let dom_action = BrowserAction {
+                                action_type: "type".to_string(),
+                                selector: Some(selector),
+                                element_description: None,
+                                text: Some(text.clone()),
+                                url: None,
+                                wait_condition: None,
+                                screenshot: false,
+                            };
+
+                            self.execute_dom_action(&dom_action).await
+                        }
+                    }
+                } else {
+                    Err(anyhow::anyhow!("Type action requires text"))
+                }
+            }
+
+            "navigate" => {
+                // Navigation doesn't need vision
+                self.execute_dom_action(action).await
+            }
+
+            "wait" => {
+                // Wait actions don't need vision
+                self.execute_dom_action(action).await
+            }
+
+            "screenshot" => {
+                let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+                let filename = format!("vision_screenshot_{}.png", timestamp);
+                std::fs::write(&filename, screenshot_data)?;
+                Ok(format!("Vision screenshot saved as {}", filename))
+            }
+
+            _ => Err(anyhow::anyhow!(
+                "Unsupported action type for Vision mode: {}",
+                action.action_type
+            )),
+        }
+    }
+
+    // DOM inspection strategy - AI analyzes HTML to find CSS selectors
+    async fn execute_vision_action_dom_strategy(
+        &mut self,
+        action: &BrowserAction,
+        screenshot_base64: &str,
+    ) -> Result<String> {
+        let driver = self
+            .driver
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("WebDriver not initialized"))?;
+
+        self.log(
+            "INFO",
+            "🧠 Using AI DOM Inspection to find precise selectors",
+            Some("dom_strategy"),
+        )
+        .await;
+
+        match action.action_type.as_str() {
+            "navigate" => {
+                if let Some(url) = &action.url {
+                    let clean_url = self.clean_url(url);
+                    self.log(
+                        "INFO",
+                        &format!("🌐 Navigating to: {}", clean_url),
+                        Some("navigate"),
+                    )
+                    .await;
+                    driver.goto(&clean_url).await?;
+                    tokio::time::sleep(Duration::from_millis(3000)).await;
+                    let result_msg = format!("Navigated to {}", clean_url);
+                    self.log("SUCCESS", &format!("✅ {}", result_msg), Some("navigate"))
+                        .await;
+                    Ok(result_msg)
+                } else {
+                    Err(anyhow::anyhow!("Navigate action requires URL"))
+                }
+            }
+
+            "type" => {
+                if let Some(text) = &action.text {
+                    let element_description = action
+                        .element_description
+                        .as_deref()
+                        .unwrap_or("input field");
+
+                    self.log(
+                        "INFO",
+                        &format!(
+                            "🧠 AI DOM Inspection: Finding selector for '{}'",
+                            element_description
+                        ),
+                        Some("dom_strategy"),
+                    )
+                    .await;
+
+                    let selector = self
+                        .get_ai_selector_for_element(
+                            screenshot_base64,
+                            element_description,
+                            "input",
+                        )
+                        .await?;
+
+                    self.log(
+                        "INFO",
+                        &format!("🎯 AI found selector: {}", selector),
+                        Some("dom_strategy"),
+                    )
+                    .await;
+
+                    let dom_action = BrowserAction {
+                        action_type: "type".to_string(),
+                        selector: Some(selector),
+                        element_description: None,
+                        text: Some(text.clone()),
+                        url: None,
+                        wait_condition: None,
+                        screenshot: false,
+                    };
+
+                    match self.execute_dom_action(&dom_action).await {
+                        Ok(result) => {
+                            self.log(
+                                "SUCCESS",
+                                &format!("✅ AI DOM typed '{}' successfully", text),
+                                Some("dom_strategy"),
+                            )
+                            .await;
+                            Ok(result)
+                        }
+                        Err(e) => {
+                            self.log(
+                                "ERROR",
+                                &format!("❌ AI DOM typing failed: {}", e),
+                                Some("dom_strategy"),
+                            )
+                            .await;
+                            Err(e)
+                        }
+                    }
+                } else {
+                    Err(anyhow::anyhow!("Type action requires text"))
+                }
+            }
+
+            "click" => {
+                let element_description = action
+                    .element_description
+                    .as_deref()
+                    .unwrap_or("clickable element");
+
+                self.log(
+                    "INFO",
+                    &format!(
+                        "🧠 AI DOM Inspection: Finding selector for '{}'",
+                        element_description
+                    ),
+                    Some("dom_strategy"),
+                )
+                .await;
+
+                let selector = self
+                    .get_ai_selector_for_element(screenshot_base64, element_description, "button")
+                    .await?;
+
+                self.log(
+                    "INFO",
+                    &format!("🎯 AI found selector: {}", selector),
+                    Some("dom_strategy"),
+                )
+                .await;
+
+                let dom_action = BrowserAction {
+                    action_type: "click".to_string(),
+                    selector: Some(selector),
+                    element_description: None,
+                    text: None,
+                    url: None,
+                    wait_condition: None,
+                    screenshot: false,
+                };
+
+                match self.execute_dom_action(&dom_action).await {
+                    Ok(result) => {
+                        self.log(
+                            "SUCCESS",
+                            "✅ AI DOM click successful",
+                            Some("dom_strategy"),
+                        )
+                        .await;
+                        Ok(result)
+                    }
+                    Err(e) => {
+                        self.log(
+                            "ERROR",
+                            &format!("❌ AI DOM click failed: {}", e),
+                            Some("dom_strategy"),
+                        )
+                        .await;
+                        Err(e)
+                    }
+                }
+            }
+
+            "wait" => {
+                self.log(
+                    "INFO",
+                    "⏱️ DOM strategy: Using standard wait implementation",
+                    Some("dom_strategy"),
+                )
+                .await;
+                self.execute_dom_action(action).await
+            }
+
+            "screenshot" => {
+                self.log(
+                    "INFO",
+                    "📸 Taking DOM strategy enhanced screenshot",
+                    Some("screenshot"),
+                )
+                .await;
+                let screenshot_data = driver.screenshot_as_png().await?;
+                let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+                let filename = format!("dom_strategy_screenshot_{}.png", timestamp);
+                std::fs::write(&filename, screenshot_data)?;
+                let result_msg = format!("DOM strategy screenshot saved as {}", filename);
+                self.log("SUCCESS", &format!("✅ {}", result_msg), Some("screenshot"))
+                    .await;
+                Ok(result_msg)
+            }
+
+            _ => {
+                let error_msg = format!(
+                    "Unsupported action type for DOM strategy: {}",
+                    action.action_type
+                );
+                self.log("ERROR", &format!("❌ {}", error_msg), Some("dom_strategy"))
+                    .await;
+                Err(anyhow::anyhow!(error_msg))
+            }
+        }
     }
 }
 

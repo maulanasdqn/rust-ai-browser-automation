@@ -4,7 +4,7 @@ use automation_integration::ACAutomationIntegration;
 use axum::http::Method;
 use axum::{
     Form, Json, Router,
-    extract::{Query, State},
+    extract::State,
     http::StatusCode,
     response::{Html, IntoResponse},
     routing::{get, post},

@@ -4,7 +4,9 @@ use anyhow::Result;
 use automation_api::{AutomationWorkflow, TestStep};
 use std::time::{Duration, SystemTime};
 
-pub use chrome::{AutomationLog, AutomationMode, ChromeAutomationEngine, VisionAction};
+pub use chrome::{
+    AutomationLog, AutomationMode, ChromeAutomationEngine, VisionAction, VisionStrategy,
+};
 
 #[derive(Debug, Clone)]
 pub struct AutomationExecutor {
@@ -13,6 +15,7 @@ pub struct AutomationExecutor {
     mode: AutomationMode,
     vision_api_key: Option<String>,
     vision_model: Option<String>,
+    vision_strategy: Option<VisionStrategy>,
 }
 
 impl AutomationExecutor {
@@ -23,6 +26,7 @@ impl AutomationExecutor {
             mode: AutomationMode::Dom,
             vision_api_key: None,
             vision_model: None,
+            vision_strategy: None,
         })
     }
 
@@ -45,6 +49,11 @@ impl AutomationExecutor {
         self
     }
 
+    pub fn with_vision_strategy(mut self, strategy: VisionStrategy) -> Self {
+        self.vision_strategy = Some(strategy);
+        self
+    }
+
     pub async fn execute_workflow(
         &mut self,
         workflow: &AutomationWorkflow,
@@ -60,16 +69,24 @@ impl AutomationExecutor {
             AutomationMode::Dom => ChromeAutomationEngine::new(self.headless),
             AutomationMode::Vision => {
                 if let Some(api_key) = &self.vision_api_key {
-                    ChromeAutomationEngine::new(self.headless)
-                        .with_vision_mode(api_key.clone(), self.vision_model.clone())
+                    let mut engine = ChromeAutomationEngine::new(self.headless)
+                        .with_vision_mode(api_key.clone(), self.vision_model.clone());
+                    if let Some(strategy) = &self.vision_strategy {
+                        engine = engine.with_vision_strategy(strategy.clone());
+                    }
+                    engine
                 } else {
                     return Err(anyhow::anyhow!("Vision mode requires API key"));
                 }
             }
             AutomationMode::Hybrid => {
                 if let Some(api_key) = &self.vision_api_key {
-                    ChromeAutomationEngine::new(self.headless)
-                        .with_hybrid_mode(api_key.clone(), self.vision_model.clone())
+                    let mut engine = ChromeAutomationEngine::new(self.headless)
+                        .with_hybrid_mode(api_key.clone(), self.vision_model.clone());
+                    if let Some(strategy) = &self.vision_strategy {
+                        engine = engine.with_vision_strategy(strategy.clone());
+                    }
+                    engine
                 } else {
                     return Err(anyhow::anyhow!("Hybrid mode requires API key"));
                 }
